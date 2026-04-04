@@ -97,6 +97,19 @@ export const PHASES: Phase[] = [
         docsLink:
           "https://effect.website/docs/getting-started/creating-effects/",
         trap: "Don't use Effect.sync for code that throws — use Effect.try instead. sync assumes no exceptions. Also, never use Effect.promise for fetch() — it can reject, so use tryPromise.",
+        code: `// Wrapping existing values
+const success = Effect.succeed(42)        // Effect<number, never, never>
+const failure = Effect.fail("oh no")      // Effect<never, string, never>
+
+// Wrapping sync code
+const random = Effect.sync(() => Math.random())
+const parsed = Effect.try(() => JSON.parse(input))
+
+// Wrapping async code
+const fetched = Effect.tryPromise({
+  try: () => fetch("https://api.example.com/data"),
+  catch: (err) => new HttpError({ cause: err })
+})`,
       },
       {
         id: 3,
@@ -125,10 +138,25 @@ export const PHASES: Phase[] = [
             name: "Effect.runFork(effect)",
             desc: "Runs on a Fiber. Non-blocking. Used internally and for advanced concurrency.",
           },
+          {
+            name: "ManagedRuntime.make(layer)",
+            desc: "Creates a reusable runtime with pre-configured layers. Ideal for app entry points with DI.",
+          },
         ],
         docsLink:
           "https://effect.website/docs/getting-started/running-effects/",
         trap: "Don't sprinkle runners throughout your code. One runner at the entry point. Compose everything else with pipe, gen, map, flatMap.",
+        code: `// One runner at the edge of your program
+const program = Effect.gen(function* () {
+  yield* Effect.log("Starting...")
+  return yield* myApp
+})
+
+// Pick the right runner:
+Effect.runSync(program)          // sync only, throws on async/failure
+Effect.runPromise(program)       // returns Promise, rejects on failure
+Effect.runPromiseExit(program)   // returns Promise<Exit>, never rejects
+Effect.runFork(program)          // runs on a Fiber, non-blocking`,
       },
       {
         id: 4,
@@ -207,6 +235,14 @@ export const PHASES: Phase[] = [
         docsLink:
           "https://effect.website/docs/getting-started/building-pipelines/",
         trap: "When to use pipe vs gen? Use gen for complex sequential logic. Use pipe for adding behaviors to an existing Effect (retry, timeout, logging). They compose together.",
+        code: `const program = pipe(
+  fetchUser(id),
+  Effect.map((user) => user.name),         // transform value
+  Effect.tap((name) => Effect.log(name)),   // side effect
+  Effect.flatMap((name) => saveGreeting(name)), // chain
+  Effect.timeout("5 seconds"),
+  Effect.retry({ times: 3 })
+)`,
       },
       {
         id: 6,
@@ -238,6 +274,18 @@ export const PHASES: Phase[] = [
         ],
         docsLink: "https://effect.website/docs/getting-started/control-flow/",
         trap: 'Effect.all is sequential by default! For parallel execution, pass { concurrency: "unbounded" } or a number. This is the opposite of Promise.all which is always concurrent.',
+        code: `// Normal JS control flow works in generators
+const program = Effect.gen(function* () {
+  const user = yield* getUser(id)
+  if (user.role === "admin") {
+    yield* grantAccess()
+  }
+  // Effect.all — sequential by default!
+  const [posts, comments] = yield* Effect.all(
+    [fetchPosts(user.id), fetchComments(user.id)],
+    { concurrency: "unbounded" } // parallel
+  )
+})`,
       },
     ],
   },
@@ -277,6 +325,19 @@ export const PHASES: Phase[] = [
         docsLink:
           "https://effect.website/docs/error-management/two-error-types/",
         trap: "Don't make everything an expected error. Use expected errors for things callers should handle (network failures, validation). Use defects for programming bugs.",
+        code: `// Expected error — caller must handle it
+const findUser = (id: string) =>
+  id === "0"
+    ? Effect.fail(new UserNotFound({ id }))  // in the E type
+    : Effect.succeed({ id, name: "Alice" })
+// Type: Effect<User, UserNotFound, never>
+
+// Defect — a bug, not in the type
+const divide = (a: number, b: number) =>
+  b === 0
+    ? Effect.die("Division by zero!")  // NOT in the E type
+    : Effect.succeed(a / b)
+// Type: Effect<number, never, never>`,
       },
       {
         id: 8,
@@ -313,6 +374,18 @@ export const PHASES: Phase[] = [
         docsLink:
           "https://effect.website/docs/error-management/expected-errors/",
         trap: "catchTag only works with tagged unions. If your errors don't have _tag, use catchAll or match instead.",
+        code: `class NotFound extends Data.TaggedError("NotFound")<{ id: string }> {}
+class Forbidden extends Data.TaggedError("Forbidden")<{}> {}
+
+const program = pipe(
+  getResource(id),
+  // Handle only NotFound, Forbidden passes through
+  Effect.catchTag("NotFound", ({ id }) =>
+    Effect.succeed(fallbackResource(id))
+  ),
+  // Transform remaining errors
+  Effect.mapError((e) => new AppError({ cause: e }))
+)`,
       },
       {
         id: 9,
@@ -344,6 +417,18 @@ export const PHASES: Phase[] = [
         ],
         docsLink: "https://effect.website/docs/error-management/retrying/",
         trap: "timeout adds TimeoutException to your error channel. If you want to handle it specifically, use catchTag('TimeoutException', ...).",
+        code: `const resilient = pipe(
+  fetchData,
+  Effect.timeout("5 seconds"),
+  Effect.retry(
+    Schedule.exponential("1 second").pipe(
+      Schedule.compose(Schedule.recurs(3))
+    )
+  ),
+  Effect.catchTag("TimeoutException", () =>
+    Effect.succeed(cachedData)
+  )
+)`,
       },
       {
         id: 10,
@@ -395,15 +480,19 @@ const getUser = (id: string) => Effect.gen(function* () {
         content:
           "The R type parameter tracks what an Effect NEEDS to run. This is Effect's built-in dependency injection — no framework needed.",
         keyIdea:
-          "Define a Service interface with Context.Tag, then use Effect.Service to create services. The R type ensures you provide all dependencies before running.",
+          "Use Effect.Service to define services as classes with auto-generated layers. The R type ensures you provide all dependencies before running.",
         concepts: [
           {
-            name: "Context.Tag / Effect.Service",
-            desc: "Declares a service interface. Think of it as a typed key in a dependency container.",
+            name: "Effect.Service",
+            desc: "Defines a service as a class with tag, implementation, and auto-generated layers (Default, DefaultWithoutDependencies).",
           },
           {
             name: "R type parameter",
             desc: "Accumulates required services. Effect<User, Error, Database | Logger> needs both Database and Logger.",
+          },
+          {
+            name: "dependencies option",
+            desc: "Pass dependencies: [OtherService.Default] in Effect.Service to wire up the dependency graph declaratively.",
           },
           {
             name: "Effect.provideService(tag, impl)",
@@ -416,10 +505,14 @@ const getUser = (id: string) => Effect.gen(function* () {
         code: `class Database extends Effect.Service<Database>()("Database", {
   effect: Effect.gen(function* () ({
     query: (sql: string) => Effect.tryPromise(() => db.query(sql))
-  }))
+  })),
+  dependencies: [ConnectionPool.Default] // auto-wired
 }) {}
 
-// Using it:
+// Auto-generated layers:
+// Database.Default — includes all dependencies
+// Database.DefaultWithoutDependencies — requires them externally
+
 const getUsers = Effect.gen(function* () {
   const db = yield* Database  // pulls from context
   return yield* db.query("SELECT * FROM users")
@@ -433,13 +526,17 @@ const getUsers = Effect.gen(function* () {
         tweet: false,
         duration: "60 min",
         content:
-          "Layers are the way to construct and compose service implementations. They handle initialization, lifecycle, and dependencies between services.",
+          "Layers are the way to construct and compose service implementations. Effect.Service auto-generates layers, but you can also build them manually for advanced cases.",
         keyIdea:
-          "A Layer<Out, Err, In> creates services of type Out, might fail with Err, and requires services In. Layers compose like LEGO — build complex dependency trees from simple pieces.",
+          "A Layer<Out, Err, In> creates services of type Out, might fail with Err, and requires services In. For most services, use Effect.Service with dependencies — manual Layer composition is for advanced wiring.",
         concepts: [
           {
+            name: "MyService.Default",
+            desc: "Auto-generated by Effect.Service. Includes all declared dependencies. Use this 90% of the time.",
+          },
+          {
             name: "Layer.succeed(tag, impl)",
-            desc: "Creates a Layer that provides a service. Simplest form.",
+            desc: "Creates a Layer that provides a service. Simplest manual form.",
           },
           {
             name: "Layer.effect(tag, effect)",
@@ -450,8 +547,8 @@ const getUsers = Effect.gen(function* () {
             desc: "Like Layer.effect but with resource management (acquire/release).",
           },
           {
-            name: "Layer.merge(layer1, layer2)",
-            desc: "Combines layers. Both run and provide their services.",
+            name: "Layer.merge / Layer.provide",
+            desc: "Combine layers (merge = both provide, provide = one feeds into another).",
           },
           {
             name: "Effect.provide(layer)",
@@ -461,6 +558,18 @@ const getUsers = Effect.gen(function* () {
         docsLink:
           "https://effect.website/docs/requirements-management/layers/",
         trap: "Layers are memoized by default within a single provide call. If ServiceB and ServiceC both depend on ServiceA, ServiceA is created once. This is usually what you want.",
+        code: `// Using Effect.Service (recommended)
+class Cache extends Effect.Service<Cache>()("Cache", {
+  effect: Effect.gen(function* () {
+    const db = yield* Database
+    return { get: (key: string) => db.query(key) }
+  }),
+  dependencies: [Database.Default]
+}) {}
+
+// Provide to your program
+const main = program.pipe(Effect.provide(Cache.Default))
+Effect.runPromise(main)`,
       },
     ],
   },
@@ -499,6 +608,15 @@ const getUsers = Effect.gen(function* () {
         ],
         docsLink: "https://effect.website/docs/resource-management/scope/",
         trap: 'Don\'t forget Effect.scoped! Without it, Scope stays in R and you can\'t run the Effect. Think of it as the "using" block in C#.',
+        code: `const dbConnection = Effect.acquireRelease(
+  Effect.tryPromise(() => pool.connect()),  // acquire
+  (conn) => Effect.sync(() => conn.release()) // always runs
+)
+
+const program = Effect.gen(function* () {
+  const conn = yield* dbConnection
+  return yield* conn.query("SELECT * FROM users")
+}).pipe(Effect.scoped) // closes scope, releases connection`,
       },
     ],
   },
@@ -514,7 +632,7 @@ const getUsers = Effect.gen(function* () {
         tweet: true,
         duration: "60 min",
         content:
-          "@effect/schema is Effect's answer to Zod. But it goes further: it does validation, parsing, encoding, AND generates types — all from one schema definition.",
+          "Schema (imported from the main effect package) is Effect's answer to Zod. But it goes further: it does validation, parsing, encoding, AND generates types — all from one schema definition.",
         keyIdea:
           "A Schema is bidirectional: it can decode (validate/parse external data) AND encode (serialize for output). One definition, multiple uses.",
         concepts: [
@@ -541,6 +659,20 @@ const getUsers = Effect.gen(function* () {
         ],
         docsLink: "https://effect.website/docs/schema/introduction/",
         trap: "Schema decode returns an Effect, not a plain value. You need to run it or yield* it. This is because decoding can fail with a ParseError.",
+        code: `import { Schema } from "effect"
+
+const User = Schema.Struct({
+  name: Schema.String,
+  age: Schema.Number,
+  email: Schema.String.pipe(Schema.pattern(/@/))
+})
+
+// Type is inferred — no manual interface needed
+type User = Schema.Schema.Type<typeof User>
+
+// Decode returns an Effect (can fail with ParseError)
+const parse = Schema.decodeUnknown(User)
+const result = yield* parse(apiResponse)`,
       },
       {
         id: 15,
@@ -554,8 +686,8 @@ const getUsers = Effect.gen(function* () {
           "Schema classes combine schema + class definition. Branded types prevent mixing up primitives (UserId vs PostId). Transformations let you decode into different shapes.",
         concepts: [
           {
-            name: "Schema.Class<Tag>()",
-            desc: "Creates a class with built-in schema, structural equality, and a _tag.",
+            name: 'Schema.Class<Self>("Tag")({fields})',
+            desc: "Creates a class with built-in schema, structural equality, and a _tag. Also see Schema.TaggedClass for auto _tag field.",
           },
           {
             name: "Schema.brand('UserId')",
@@ -683,6 +815,19 @@ const getUsers = Effect.gen(function* () {
         ],
         docsLink: "https://effect.website/docs/concurrency/fibers/",
         trap: "Fibers are low-level. For most concurrent work, use Effect.all with concurrency options, or Effect.forEach with concurrency. Only reach for raw Fibers when you need fine-grained control.",
+        code: `const program = Effect.gen(function* () {
+  // Fork a background task
+  const fiber = yield* Effect.fork(longRunningJob)
+
+  // Do other work concurrently...
+  yield* processItems()
+
+  // Wait for the background task
+  const result = yield* Fiber.join(fiber)
+
+  // Or: run 10 tasks with concurrency limit
+  yield* Effect.forEach(urls, fetchUrl, { concurrency: 10 })
+})`,
       },
       {
         id: 19,
@@ -756,6 +901,13 @@ const getUsers = Effect.gen(function* () {
         ],
         docsLink: "https://effect.website/docs/stream/introduction/",
         trap: "Streams are lazy and pull-based. Don't confuse them with EventEmitters (push-based). A Stream doesn't produce values until a consumer (Sink/runner) requests them.",
+        code: `const pipeline = Stream.fromIterable([1, 2, 3, 4, 5]).pipe(
+  Stream.map((n) => n * 2),
+  Stream.filter((n) => n > 4),
+  Stream.tap((n) => Effect.log(\`Processing: \${n}\`)),
+  Stream.runCollect // collects into a Chunk
+)
+// Result: Chunk(6, 8, 10)`,
       },
     ],
   },
