@@ -976,6 +976,251 @@ const result = yield* parse(apiResponse)`,
       },
     ],
   },
+  {
+    phase: "Ecosystem",
+    slug: "ecosystem",
+    phaseColor: "#C5C8D8",
+    steps: [
+      {
+        id: 23,
+        title: "Configuration",
+        subtitle: "Config, ConfigProvider, secrets",
+        tweet: false,
+        duration: "30 min",
+        content:
+          "Effect has built-in typed configuration that reads from env vars by default. Config values are Effects — they compose, fail with clear messages, and can be swapped for testing.",
+        keyIdea:
+          "Config<A> describes what config you need. ConfigProvider is the backend that loads it. Default reads from env vars, but you can swap to JSON, Map, or custom sources.",
+        concepts: [
+          {
+            name: "Config.string / number / boolean",
+            desc: "Primitive config readers. yield* Config.number('PORT') reads PORT from env.",
+          },
+          {
+            name: "Config.nested(config, 'PREFIX')",
+            desc: "Namespaces config keys. Config.nested(Config.number('PORT'), 'SERVER') reads SERVER_PORT.",
+          },
+          {
+            name: "Config.redacted('API_KEY')",
+            desc: "Reads a secret. The value is wrapped in Redacted<string> to prevent accidental logging.",
+          },
+          {
+            name: "ConfigProvider.fromJson / fromMap",
+            desc: "Custom config sources. Use Effect.withConfigProvider to swap the backend.",
+          },
+          {
+            name: "Config.withDefault(config, value)",
+            desc: "Provides a fallback if the config key is missing.",
+          },
+        ],
+        docsLink: "https://effect.website/docs/configuration/",
+        trap: "Config values are Effects — they can fail! If a required env var is missing, you get a clear ConfigError, not undefined. Handle it or let it crash early.",
+        code: `const appConfig = Effect.gen(function* () {
+  const host = yield* Config.string("HOST").pipe(
+    Config.withDefault("localhost")
+  )
+  const port = yield* Config.number("PORT")
+  const apiKey = yield* Config.redacted("API_KEY")
+  return { host, port, apiKey }
+})
+// Swap provider for testing:
+const test = appConfig.pipe(
+  Effect.withConfigProvider(
+    ConfigProvider.fromJson({ HOST: "test", PORT: 3000, API_KEY: "xxx" })
+  )
+)`,
+      },
+      {
+        id: 24,
+        title: "HTTP Client & Server",
+        subtitle: "@effect/platform for HTTP",
+        tweet: true,
+        duration: "60 min",
+        content:
+          "@effect/platform provides a typed HTTP client and server that integrate with Effect's error handling, services, and schemas. No more raw fetch().",
+        keyIdea:
+          "HttpClient is a service you can inject, mock, and compose. Pair it with Schema for automatic request/response validation. HttpRouter builds type-safe API servers.",
+        concepts: [
+          {
+            name: "HttpClient",
+            desc: "A service for making HTTP requests. Inject via the R type, swap for testing.",
+          },
+          {
+            name: "HttpClientRequest.get / post",
+            desc: "Build typed requests. Chain with .pipe() to add headers, body, etc.",
+          },
+          {
+            name: "HttpClientResponse.schemaBodyJson",
+            desc: "Decode response body using a Schema. Validation errors go to the E channel.",
+          },
+          {
+            name: "HttpRouter.make",
+            desc: "Build type-safe API routes. Each route is an Effect with typed errors and deps.",
+          },
+          {
+            name: "NodeHttpClient.layer",
+            desc: "Node.js implementation of HttpClient. Provide it at the edge of your app.",
+          },
+        ],
+        docsLink: "https://effect.website/docs/platform/http-client/",
+        trap: "HttpClient is a service — you must provide its layer (NodeHttpClient.layer or FetchHttpClient.layer). Without it, R won't be satisfied.",
+        code: `import { HttpClient, HttpClientRequest } from "@effect/platform"
+
+const fetchTodo = (id: number) => Effect.gen(function* () {
+  const client = yield* HttpClient.HttpClient
+  const response = yield* client.get(
+    \`https://jsonplaceholder.typicode.com/todos/\${id}\`
+  )
+  return yield* response.json
+})
+// Type: Effect<unknown, HttpClientError, HttpClient>
+
+// Provide the client layer:
+const main = fetchTodo(1).pipe(
+  Effect.provide(NodeHttpClient.layerUndici)
+)`,
+      },
+      {
+        id: 25,
+        title: "FileSystem & Command",
+        subtitle: "@effect/platform for OS interactions",
+        tweet: false,
+        duration: "45 min",
+        content:
+          "@effect/platform provides cross-platform FileSystem and Command services for file I/O and running subprocesses — all as Effects with proper resource management.",
+        keyIdea:
+          "FileSystem and Command are services, not global APIs. This means they're injectable, testable, and their errors are typed. Scoped resources ensure files are always closed.",
+        concepts: [
+          {
+            name: "FileSystem.readFileString / writeFileString",
+            desc: "Read/write files as Effects. Errors are typed as PlatformError.",
+          },
+          {
+            name: "FileSystem.stream(path)",
+            desc: "Stream a file's contents. Composes with Stream operators for processing.",
+          },
+          {
+            name: "Command.make('git', 'status')",
+            desc: "Build a subprocess command. Run it as an Effect with typed exit codes.",
+          },
+          {
+            name: "NodeFileSystem.layer / NodeCommandExecutor.layer",
+            desc: "Node.js implementations. Provide at the edge, mock in tests.",
+          },
+        ],
+        docsLink: "https://effect.website/docs/platform/file-system/",
+        trap: "FileSystem operations return PlatformError — don't try/catch them. Use catchTag or mapError to handle specific failure modes (NotFound, Permission, etc.).",
+        code: `import { FileSystem } from "@effect/platform"
+import { NodeFileSystem } from "@effect/platform-node"
+
+const processConfig = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem
+  const raw = yield* fs.readFileString("config.json")
+  const parsed = yield* Schema.decodeUnknown(AppConfig)(JSON.parse(raw))
+  return parsed
+}).pipe(Effect.provide(NodeFileSystem.layer))`,
+      },
+      {
+        id: 26,
+        title: "SQL & Databases",
+        subtitle: "@effect/sql for type-safe queries",
+        tweet: false,
+        duration: "45 min",
+        content:
+          "@effect/sql provides type-safe database access with connection pooling, transactions, and migrations — all integrated with Effect's service and resource management.",
+        keyIdea:
+          "SqlClient is a service with tagged template queries. Transactions are scoped resources. Combine with Schema for fully typed row decoding.",
+        concepts: [
+          {
+            name: "SqlClient.SqlClient",
+            desc: "The main database service. Provides query, execute, and transaction methods.",
+          },
+          {
+            name: "sql`SELECT * FROM users`",
+            desc: "Tagged template for safe parameterized queries. Prevents SQL injection.",
+          },
+          {
+            name: "SqlResolver.findById / grouped",
+            desc: "Build batched, cached database resolvers. Automatic N+1 prevention.",
+          },
+          {
+            name: "@effect/sql-pg / sql-mysql2 / sql-sqlite",
+            desc: "Database-specific implementations. Provide as a Layer.",
+          },
+        ],
+        docsLink: "https://effect.website/docs/platform/sql/",
+        trap: "SqlClient uses tagged templates, not string concatenation. sql`SELECT * FROM users WHERE id = ${id}` is safe. sql('SELECT ... ' + id) is NOT — it bypasses parameterization.",
+        code: `import { SqlClient } from "@effect/sql"
+
+const getUser = (id: number) => Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  const rows = yield* sql\`SELECT * FROM users WHERE id = \${id}\`
+  return rows[0]
+})
+
+// Transactions are scoped:
+const transfer = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  yield* sql.withTransaction(Effect.gen(function* () {
+    yield* sql\`UPDATE accounts SET balance = balance - 100 WHERE id = 1\`
+    yield* sql\`UPDATE accounts SET balance = balance + 100 WHERE id = 2\`
+  }))
+})`,
+      },
+      {
+        id: 27,
+        title: "Real-World Patterns",
+        subtitle: "Putting it all together",
+        tweet: true,
+        duration: "60 min",
+        content:
+          "You've learned the pieces — now see how they compose in production. This step covers common patterns for structuring real Effect applications.",
+        keyIdea:
+          "A typical Effect app: services define capabilities, layers wire them up, Config loads settings, Schema validates boundaries, and one ManagedRuntime runs everything.",
+        concepts: [
+          {
+            name: "App entry point pattern",
+            desc: "ManagedRuntime.make(AppLayer) at the top. All services, config, and resources composed into one layer.",
+          },
+          {
+            name: "Repository pattern",
+            desc: "Effect.Service for data access. Schema for row types. SqlClient inside the service effect.",
+          },
+          {
+            name: "Error boundary pattern",
+            desc: "Domain errors at service boundaries, catchTag at the handler level, defects for bugs.",
+          },
+          {
+            name: "Graceful shutdown",
+            desc: "Effect.addFinalizer in layers for cleanup. ManagedRuntime.dispose for orderly shutdown.",
+          },
+          {
+            name: "Testing pyramid",
+            desc: "Unit: mock services with Layer. Integration: real DB with test containers. E2E: full ManagedRuntime.",
+          },
+        ],
+        docsLink: "https://effect.website/docs/guides/essentials/",
+        trap: "Don't over-abstract early. Start with one service, one layer. Extract shared patterns only after you see repetition across 3+ services.",
+        code: `// Typical app structure
+const AppLayer = Layer.mergeAll(
+  Database.Default,
+  Cache.Default,
+  HttpApi.Default
+).pipe(
+  Layer.provide(ConfigLive),
+  Layer.provide(NodeHttpClient.layerUndici)
+)
+
+const runtime = ManagedRuntime.make(AppLayer)
+
+// In your HTTP handler / main:
+const result = await runtime.runPromise(handleRequest(req))
+
+// Graceful shutdown:
+process.on("SIGTERM", () => runtime.dispose())`,
+      },
+    ],
+  },
 ];
 
 export const TOTAL_STEPS = PHASES.reduce(
@@ -990,7 +1235,9 @@ export const TWEET_TEMPLATES: Record<number, string> = {
   11: `Dependency injection in @EffectTS_ is tracked by the TYPE SYSTEM.\n\nEffect<User, DbError, Database | Logger>\n\nThe compiler literally won't let you run this until you provide Database AND Logger.\n\nNo runtime DI container. No decorators. Just types.\n\n#TypeScript`,
   14: `@effect/schema is what happens when Zod meets bidirectional transforms:\n\n-> decode (validate external data)\n-> encode (serialize for output)\n-> type inference\n\nOne schema definition. Multiple directions.\n\n#EffectTS #TypeScript`,
   18: `Fibers in @EffectTS_ = lightweight virtual threads for TypeScript\n\nEffect.fork -> start a fiber\nFiber.join -> wait for result\nFiber.interrupt -> cancel (resources auto-cleanup)\n\nOr just: Effect.all(tasks, { concurrency: 10 })\n\n#EffectTS`,
-  22: `Finished my @EffectTS_ learning journey!\n\nBiggest takeaways:\n- Effect<A, E, R> — one type to rule them all\n- Generators for logic, pipes for behavior\n- Services + Layers = testable by default\n- Schema for validation + serialization\n\n#EffectTS #TypeScript`,
+  22: `Finished the core @EffectTS_ curriculum!\n\nBiggest takeaways:\n- Effect<A, E, R> — one type to rule them all\n- Generators for logic, pipes for behavior\n- Services + Layers = testable by default\n- Schema for validation + serialization\n\nNow onto the ecosystem.\n\n#EffectTS #TypeScript`,
+  24: `@effect/platform's HttpClient changed how I think about HTTP in TypeScript:\n\n- It's a SERVICE you inject (mockable!)\n- Schema validates responses automatically\n- Errors are typed, not thrown\n- Same code works Node/Bun/browser\n\nNo more raw fetch().\n\n#EffectTS`,
+  27: `Finished my @EffectTS_ journey — here's the production pattern:\n\n1. Services define capabilities\n2. Layers wire dependencies\n3. Config loads settings\n4. Schema validates boundaries\n5. ManagedRuntime runs everything\n\nOne type. Full stack. Type-safe.\n\n#EffectTS #TypeScript`,
 };
 
 export function getPhaseBySlug(slug: string): Phase | undefined {
