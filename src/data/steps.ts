@@ -3,6 +3,13 @@ export interface Concept {
 	desc: string;
 }
 
+export interface Practice {
+	title: string;
+	prompt: string;
+	startCode: string;
+	solution: string;
+}
+
 export interface Step {
 	id: number;
 	title: string;
@@ -15,6 +22,7 @@ export interface Step {
 	docsLink: string;
 	trap: string;
 	code?: string;
+	practice?: Practice[];
 }
 
 export interface Phase {
@@ -35,7 +43,7 @@ export const PHASES: Phase[] = [
 				title: "The Mental Model",
 				subtitle: "Why Effect exists & what it replaces",
 				tweet: false,
-				duration: "30 min",
+				duration: "10 min",
 				content:
 					"Before writing any code, understand what Effect actually is. It's NOT just another utility library — it's a complete paradigm for describing programs.",
 				keyIdea:
@@ -57,13 +65,60 @@ export const PHASES: Phase[] = [
 				docsLink:
 					"https://effect.website/docs/getting-started/the-effect-type/",
 				trap: 'Coming from async/await, you\'ll instinctively think an Effect "runs" when created. It doesn\'t. const x = Effect.log("hi") prints nothing. You must run it.',
+				practice: [
+					{
+						title: "Predict the output",
+						prompt:
+							"What gets printed to the console? Remember: Effects are lazy blueprints, not eager Promises.",
+						startCode: `import { Effect } from "effect"
+
+const a = Effect.sync(() => console.log("hello"))
+const b = Effect.succeed(42)
+console.log("done")
+
+// What prints? (A) "hello" then "done"  (B) "done" only  (C) nothing`,
+						solution: `// Answer: (B) "done" only
+// Effect.sync wraps a function but does NOT execute it.
+// Effect.succeed wraps a value — no side effect at all.
+// Only console.log("done") runs because it's plain TS, not an Effect.`,
+					},
+					{
+						title: "Label the types",
+						prompt:
+							"Fill in the A (success), E (error), and R (requirements) for each Effect type.",
+						startCode: `import { Effect } from "effect"
+
+// What are A, E, R for each?
+const a = Effect.succeed("hello")
+// Effect<???, ???, ???>
+
+const b = Effect.fail(new Error("boom"))
+// Effect<???, ???, ???>
+
+const c = Effect.sync(() => Math.random())
+// Effect<???, ???, ???>`,
+						solution: `import { Effect } from "effect"
+
+const a = Effect.succeed("hello")
+// Effect<string, never, never>
+// A=string (the value), E=never (can't fail), R=never (no deps)
+
+const b = Effect.fail(new Error("boom"))
+// Effect<never, Error, never>
+// A=never (never succeeds), E=Error, R=never
+
+const c = Effect.sync(() => Math.random())
+// Effect<number, never, never>
+// A=number (return type of the fn), E=never (sync assumes no throw), R=never`,
+					},
+				],
 			},
 			{
 				id: 2,
 				title: "Creating Effects",
 				subtitle: "succeed, fail, sync, promise, try",
 				tweet: false,
-				duration: "45 min",
+				duration: "15 min",
 				content:
 					"Learn the constructors — how to wrap existing values, sync code, and async code into the Effect world.",
 				keyIdea:
@@ -97,6 +152,70 @@ export const PHASES: Phase[] = [
 				docsLink:
 					"https://effect.website/docs/getting-started/creating-effects/",
 				trap: "Don't use Effect.sync for code that throws — use Effect.try instead. sync assumes no exceptions. Also, never use Effect.promise for fetch() — it can reject, so use tryPromise.",
+				practice: [
+					{
+						title: "Pick the right constructor",
+						prompt:
+							"For each scenario, choose the correct Effect constructor. Think about: does it throw? Is it async? Do you already have the value?",
+						startCode: `import { Effect } from "effect"
+
+// 1. You have a config object already loaded
+const config = { port: 3000 }
+const getConfig = Effect.???(config)
+
+// 2. Reading from localStorage (sync, might throw in SSR)
+const getToken = Effect.???(() => localStorage.getItem("token"))
+
+// 3. Calling an external API (async, might reject)
+const fetchUser = Effect.???(() => fetch("/api/user"))
+
+// 4. Getting the current date (sync, never throws)
+const now = Effect.???(() => new Date())`,
+						solution: `import { Effect } from "effect"
+
+// 1. Already have a value → succeed
+const config = { port: 3000 }
+const getConfig = Effect.succeed(config)
+
+// 2. Sync code that might throw → try
+const getToken = Effect.try(() => localStorage.getItem("token"))
+
+// 3. Async code that might reject → tryPromise
+const fetchUser = Effect.tryPromise(() => fetch("/api/user"))
+
+// 4. Sync code that won't throw → sync
+const now = Effect.sync(() => new Date())`,
+					},
+					{
+						title: "Wrap a real function",
+						prompt:
+							"Convert this vanilla TS function into an Effect. JSON.parse can throw, so pick the right constructor and map the error.",
+						startCode: `import { Effect } from "effect"
+
+// Vanilla TS — throws on invalid JSON
+function parseJson(raw: string) {
+  return JSON.parse(raw)
+}
+
+// TODO: rewrite as an Effect that captures the error
+const parseJsonEffect = (raw: string) =>
+  Effect.???(/* your code here */)`,
+						solution: `import { Effect } from "effect"
+
+// Why is (raw: string) outside Effect.try?
+// Effect.try(...) returns a single Effect — a blueprint for one computation.
+// The outer function parameterizes it: raw is captured via closure.
+// This is the same pattern as: const fn = (x) => new Promise(r => r(x))
+// You'll see this everywhere in Effect: regular function outside, Effect inside.
+
+const parseJsonEffect = (raw: string) =>
+  Effect.try({
+    try: () => JSON.parse(raw),
+    catch: (error) => new Error(\`Invalid JSON: \${error}\`)
+  })
+// Type: (raw: string) => Effect<unknown, Error, never>`,
+					},
+				],
 				code: `// Wrapping existing values
 const success = Effect.succeed(42)        // Effect<number, never, never>
 const failure = Effect.fail("oh no")      // Effect<never, string, never>
@@ -114,9 +233,9 @@ const fetched = Effect.tryPromise({
 			{
 				id: 3,
 				title: "Running Effects",
-				subtitle: "runSync, runPromise, runFork",
+				subtitle: "runSync, runPromise, runPromiseExit",
 				tweet: false,
-				duration: "30 min",
+				duration: "15 min",
 				content:
 					"Effects are blueprints. Runners execute them. Choose the right runner for your context.",
 				keyIdea:
@@ -136,16 +255,63 @@ const fetched = Effect.tryPromise({
 					},
 					{
 						name: "Effect.runFork(effect)",
-						desc: "Runs on a Fiber. Non-blocking. Used internally and for advanced concurrency.",
-					},
-					{
-						name: "ManagedRuntime.make(layer)",
-						desc: "Creates a reusable runtime with pre-configured layers. Ideal for app entry points with DI.",
+						desc: "Runs on a lightweight Fiber (covered in Phase 8: Concurrency). You won't need this yet.",
 					},
 				],
 				docsLink:
 					"https://effect.website/docs/getting-started/running-effects/",
 				trap: "Don't sprinkle runners throughout your code. One runner at the entry point. Compose everything else with pipe, gen, map, flatMap.",
+				practice: [
+					{
+						title: "Match the runner",
+						prompt:
+							"Each runner behaves differently on success, failure, and async effects. Predict what happens in each case.",
+						startCode: `import { Effect } from "effect"
+
+const success = Effect.succeed(42)
+const failure = Effect.fail("oops")
+const async_ = Effect.tryPromise(() => fetch("https://example.com"))
+
+// What does each return or throw?
+Effect.runSync(success)     // → ???
+Effect.runSync(failure)     // → ???
+Effect.runSync(async_)      // → ???
+
+Effect.runPromise(success)  // → ???
+Effect.runPromise(failure)  // → ???`,
+						solution: `import { Effect } from "effect"
+
+Effect.runSync(success)     // → 42
+Effect.runSync(failure)     // → throws (runSync throws when the Effect fails)
+Effect.runSync(async_)      // → throws (runSync can't handle async Effects)
+
+Effect.runPromise(success)  // → Promise that resolves to 42
+Effect.runPromise(failure)  // → Promise that rejects with "oops"`,
+					},
+					{
+						title: "runPromise vs runSync",
+						prompt:
+							"This code crashes. Figure out why, and fix it by choosing a different runner.",
+						startCode: `import { Effect } from "effect"
+
+const fetchData = Effect.tryPromise(
+  () => fetch("https://api.example.com/data")
+)
+
+// This crashes — why?
+const result = Effect.runSync(fetchData)
+console.log(result)`,
+						solution: `import { Effect } from "effect"
+
+const fetchData = Effect.tryPromise(
+  () => fetch("https://api.example.com/data")
+)
+
+// runSync can't handle async Effects — fetch returns a Promise.
+// Fix: use runPromise, which returns a Promise itself.
+Effect.runPromise(fetchData).then(console.log)`,
+					},
+				],
 				code: `// One runner at the edge of your program
 const program = Effect.gen(function* () {
   yield* Effect.log("Starting...")
@@ -155,15 +321,14 @@ const program = Effect.gen(function* () {
 // Pick the right runner:
 Effect.runSync(program)          // sync only, throws on async/failure
 Effect.runPromise(program)       // returns Promise, rejects on failure
-Effect.runPromiseExit(program)   // returns Promise<Exit>, never rejects
-Effect.runFork(program)          // runs on a Fiber, non-blocking`,
+Effect.runPromiseExit(program)   // returns Promise<Exit>, never rejects`,
 			},
 			{
 				id: 4,
 				title: "Generators (Effect.gen)",
 				subtitle: "The async/await of Effect",
 				tweet: true,
-				duration: "45 min",
+				duration: "15 min",
 				content:
 					"Effect.gen is how you write sequential Effect code that reads like async/await. This is the syntax you'll use 90% of the time.",
 				keyIdea:
@@ -185,13 +350,85 @@ Effect.runFork(program)          // runs on a Fiber, non-blocking`,
 				docsLink:
 					"https://effect.website/docs/getting-started/using-generators/",
 				trap: "You MUST use yield* (with the asterisk), not plain yield. Also, the generator must be function*, not an arrow function.",
+				practice: [
+					{
+						title: "Convert async/await to Effect.gen",
+						prompt:
+							"Rewrite this async function using Effect.gen. Replace await with yield*, and wrap the fetch call properly.",
+						startCode: `// Original async/await code
+async function getUser(id: string) {
+  const res = await fetch(\`/api/users/\${id}\`)
+  const user = await res.json()
+  return user.name
+}
+
+// TODO: rewrite using Effect.gen
+import { Effect } from "effect"
+
+const getUser = (id: string) =>
+  Effect.gen(function* () {
+    // your code here
+  })`,
+						solution: `import { Effect } from "effect"
+
+const getUser = (id: string) =>
+  Effect.gen(function* () {
+    const res = yield* Effect.tryPromise({
+      try: () => fetch(\`/api/users/\${id}\`),
+      catch: () => new Error("fetch failed")
+    })
+    const user = yield* Effect.tryPromise({
+      try: () => res.json(),
+      catch: () => new Error("invalid JSON")
+    })
+    return user.name as string
+  })
+// Type: (id: string) => Effect<string, Error, never>
+// The catch mapper controls what goes in the E channel.
+// Nothing runs until you call a runner!`,
+					},
+					{
+						title: "Compose multiple effects",
+						prompt:
+							"Use Effect.gen to sequence three independent effects and combine their results into one object.",
+						startCode: `import { Effect } from "effect"
+
+const getName = Effect.succeed("Alice")
+const getAge = Effect.succeed(30)
+const getRole = Effect.succeed("admin")
+
+// TODO: use Effect.gen to combine into { name, age, role }
+const getProfile = Effect.gen(function* () {
+  // your code here
+})
+
+// Then run it:
+// Effect.runSync(getProfile)
+// → { name: "Alice", age: 30, role: "admin" }`,
+						solution: `import { Effect } from "effect"
+
+const getName = Effect.succeed("Alice")
+const getAge = Effect.succeed(30)
+const getRole = Effect.succeed("admin")
+
+const getProfile = Effect.gen(function* () {
+  const name = yield* getName   // no parentheses — getName is already an Effect
+  const age = yield* getAge     // same as: await myPromise (not myPromise())
+  const role = yield* getRole   // use () only when calling a function that RETURNS an Effect
+  return { name, age, role }
+})
+
+console.log(Effect.runSync(getProfile))
+// → { name: "Alice", age: 30, role: "admin" }`,
+					},
+				],
 				code: `const program = Effect.gen(function* () {
   const user = yield* fetchUser(id)    // like: await fetchUser(id)
   const posts = yield* fetchPosts(user.id)
   return { user, posts }
 })
-// program is Effect<{user, posts}, HttpError, ApiService>
-// Nothing has executed yet!`,
+// program is Effect<{ user, posts }, Error, never>
+// Nothing has executed yet — it's still just a blueprint!`,
 			},
 		],
 	},
@@ -1228,7 +1465,7 @@ export const TOTAL_STEPS = PHASES.reduce(
 );
 
 export const TWEET_TEMPLATES: Record<number, string> = {
-	4: `Just learned Effect.gen — it's like async/await but with typed errors and dependency tracking built in.\n\nyield* is the new await.\n\nThe key insight: Effects are LAZY. Nothing runs until you tell it to.\n\n#EffectTS #TypeScript`,
+	4: `Effect.gen = async/await but with typed errors\n\nconst name = Effect.succeed("Alice")\nconst getUser = (id) => Effect.tryPromise(...)\n\nyield* name        — no (), it's already an Effect\nyield* getUser(id) — (), it returns an Effect\n\n#EffectTS #TypeScript`,
 	7: `The biggest "aha" moment learning @EffectTS_:\n\nThere are TWO kinds of errors:\n\n- Expected (in the type signature) — you MUST handle them\n- Defects (hidden) — bugs that bubble up\n\ntry/catch treats all errors the same. Effect doesn't.\n\n#TypeScript`,
 	10: `Yieldable errors in @EffectTS_ are genius:\n\nclass NotFound extends Data.TaggedError("NotFound")<{ id: string }> {}\n\nyield* new NotFound({ id })\n\nType-safe "throwing" inside generators. No more stringly-typed errors.\n\n#EffectTS`,
 	11: `Dependency injection in @EffectTS_ is tracked by the TYPE SYSTEM.\n\nEffect<User, DbError, Database | Logger>\n\nThe compiler literally won't let you run this until you provide Database AND Logger.\n\nNo runtime DI container. No decorators. Just types.\n\n#TypeScript`,

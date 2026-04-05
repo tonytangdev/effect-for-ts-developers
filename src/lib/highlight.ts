@@ -3,6 +3,6 @@ import { codeToHtml } from "shiki";
 export async function highlightCode(code: string): Promise<string> {
   return codeToHtml(code, {
     lang: "typescript",
-    theme: "vitesse-dark",
+    theme: "catppuccin-mocha",
   });
 }

@@ -99,6 +99,41 @@ export function StepCard({ step, phase }: StepCardProps) {
           </div>
         )}
 
+        {/* Practice exercises */}
+        {step.practice && step.practice.length > 0 && (
+          <div className="mb-4">
+            <span className="text-[9px] uppercase tracking-[2px] text-text-muted block mb-2.5 font-semibold">
+              Practice
+            </span>
+            {step.practice.map((p, i) => (
+              <div
+                key={i}
+                className="mb-3 border border-border bg-bg-elevated"
+              >
+                <div className="p-3 sm:p-4">
+                  <div className="text-xs font-medium text-text-heading mb-1">
+                    {p.title}
+                  </div>
+                  <p className="text-[11px] text-text-subtle leading-relaxed mb-3">
+                    {p.prompt}
+                  </p>
+                  <CodeBlock code={p.startCode} />
+                </div>
+                <details className="group">
+                  <summary className="px-3 sm:px-4 py-2 text-[10px] uppercase tracking-[1.5px] font-semibold cursor-pointer select-none"
+                    style={{ color: phase.phaseColor }}
+                  >
+                    Reveal solution
+                  </summary>
+                  <div className="px-3 sm:px-4 pb-3">
+                    <CodeBlock code={p.solution} />
+                  </div>
+                </details>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Common trap */}
         <div className="bg-trap-bg border border-trap-border p-3 sm:p-4 mb-4 text-[11px] leading-relaxed text-trap">
           <span className="text-[9px] uppercase tracking-[2px] block mb-1.5 font-semibold">
