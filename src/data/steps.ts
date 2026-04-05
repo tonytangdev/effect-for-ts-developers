@@ -2246,9 +2246,9 @@ const program = Effect.gen(function* () {
 				tweet: true,
 				duration: "60 min",
 				content:
-					"Schema (imported from the main effect package) is Effect's answer to Zod. But it goes further: it does validation, parsing, encoding, AND generates types — all from one schema definition.",
+					"In TypeScript, you validate with Zod/Yup, define types manually, and serialize with yet another library. Schema does all three from one definition. It decodes (validate/parse external data), encodes (serialize for output), and infers TypeScript types — no duplication. Schema.decodeUnknown returns an Effect (can fail), Schema.decodeUnknownSync throws on failure.",
 				keyIdea:
-					"A Schema is bidirectional: it can decode (validate/parse external data) AND encode (serialize for output). One definition, multiple uses.",
+					"A Schema is bidirectional: it can decode (validate/parse external data) AND encode (serialize for output). One definition, multiple uses. Think of it as Zod + TypeScript types + serialization in one.",
 				concepts: [
 					{
 						name: "Schema.Struct({ ... })",
@@ -2256,37 +2256,199 @@ const program = Effect.gen(function* () {
 					},
 					{
 						name: "Schema.decodeUnknown(schema)",
-						desc: "Creates an Effect that validates/parses unknown data against the schema.",
+						desc: "Returns a function (data) => Effect<A, ParseError>. Effectful — compose in gen or pipe.",
+					},
+					{
+						name: "Schema.decodeUnknownSync(schema)",
+						desc: "Sync variant — throws ParseError on failure. Good for scripts or tests.",
 					},
 					{
 						name: "Schema.encode(schema)",
-						desc: "Creates an Effect that serializes data according to the schema.",
+						desc: "Serializes a typed value back to the encoded form. Bidirectional.",
 					},
 					{
 						name: "Schema.String, Number, Boolean",
-						desc: "Primitive schemas. Compose them into complex structures.",
+						desc: "Primitive schemas. Compose them into Struct, Array, Union, etc.",
 					},
 					{
-						name: "Type inference",
-						desc: "Schema.Type<typeof mySchema> extracts the TypeScript type. No manual type duplication.",
+						name: "Schema.Array(schema)",
+						desc: "Array of a schema. Like z.array(). Schema.NonEmptyArray for non-empty.",
+					},
+					{
+						name: "Schema.Union(A, B, ...)",
+						desc: "Union of schemas. Like z.union(). For literals: Schema.Literal('a', 'b').",
+					},
+					{
+						name: "Schema.optional / Schema.optionalWith",
+						desc: "Makes a field optional. optionalWith supports defaults: { default: () => value }.",
+					},
+					{
+						name: "Schema.Schema.Type<typeof S>",
+						desc: "Extracts the TypeScript type from a schema. No manual interface needed.",
 					},
 				],
 				docsLink: "https://effect.website/docs/schema/introduction/",
-				trap: "Schema decode returns an Effect, not a plain value. You need to run it or yield* it. This is because decoding can fail with a ParseError.",
+				trap: "Schema.decodeUnknown returns an Effect, not a plain value. You need to yield* it or use decodeUnknownSync. This is because decoding can fail with a ParseError — Effect makes that explicit in the type.",
+				tsCode: `// TypeScript: separate validation lib + manual types + manual serialization
+import { z } from "zod"
+
+// 1. Define Zod schema for validation
+const UserSchema = z.object({
+  name: z.string(),
+  age: z.number().int().positive(),
+  email: z.string().email(),
+  role: z.enum(["admin", "user"]),
+  tags: z.array(z.string()).default([])
+})
+
+// 2. Extract type (at least Zod gives you this)
+type User = z.infer<typeof UserSchema>
+
+// 3. Parse (throws on failure — no typed errors)
+const user = UserSchema.parse(apiResponse)
+
+// 4. Serialize? Zod doesn't help — manual JSON.stringify
+// 5. Transform for API response? Write another function
+// 6. Different encoded vs decoded shapes? More manual work`,
 				code: `import { Schema } from "effect"
 
+// ── 1. Define schema — types are inferred automatically ──
 const User = Schema.Struct({
   name: Schema.String,
-  age: Schema.Number,
-  email: Schema.String.pipe(Schema.pattern(/@/))
+  age: Schema.Number.pipe(Schema.int(), Schema.positive()),
+  email: Schema.String.pipe(Schema.pattern(/@/)),
+  role: Schema.Literal("admin", "user"),
+  tags: Schema.optionalWith(Schema.Array(Schema.String), {
+    default: () => []        // default value if missing
+  })
 })
 
 // Type is inferred — no manual interface needed
-type User = Schema.Schema.Type<typeof User>
+type User = typeof User.Type
+// { name: string; age: number; email: string; role: "admin" | "user"; tags: string[] }
 
-// Decode returns an Effect (can fail with ParseError)
-const parse = Schema.decodeUnknown(User)
-const result = yield* parse(apiResponse)`,
+// ── 2. Decode (effectful — ParseError is a typed error) ──
+const parseUser = Schema.decodeUnknown(User)
+const program = Effect.gen(function* () {
+  const user = yield* parseUser(apiResponse)
+  //    ^? User — fully typed
+  return user
+})
+
+// ── 3. Decode (sync — throws on failure) ──
+const user = Schema.decodeUnknownSync(User)(apiResponse)
+
+// ── 4. Encode — serialize back to encoded form ──
+const encoded = Schema.encodeSync(User)(user)
+
+// ── 5. Compose schemas ──
+const CreateUser = Schema.Struct({
+  ...User.fields,
+  password: Schema.String.pipe(Schema.minLength(8))
+})`,
+				diagram: `  Zod                              Effect Schema
+  ───                              ─────────────
+
+  z.object({...})                  Schema.Struct({...})
+  z.string()                       Schema.String
+  z.number()                       Schema.Number
+  z.array(z.string())             Schema.Array(Schema.String)
+  z.enum(["a","b"])                Schema.Literal("a", "b")
+  z.union([a, b])                  Schema.Union(a, b)
+  z.optional()                     Schema.optional
+  .default(val)                    Schema.optionalWith(..., { default: () => val })
+  .refine(fn)                      Schema.filter(fn)
+
+  z.infer<typeof S>                typeof S.Type
+
+  schema.parse(data)               Schema.decodeUnknownSync(S)(data)  // throws
+                                   Schema.decodeUnknown(S)(data)      // returns Effect
+                                   Schema.encodeSync(S)(data)         // encode back!
+
+  Key difference:
+  ┌─────────────────────────────────────────────────────┐
+  │ Zod: decode only (one direction)                    │
+  │ Schema: decode AND encode (bidirectional)            │
+  │                                                     │
+  │ Zod: parse() throws or returns                      │
+  │ Schema: decodeUnknown returns Effect<A, ParseError>  │
+  │         (typed errors, composable)                   │
+  └─────────────────────────────────────────────────────┘`,
+				practice: [
+					{
+						title: "Define a schema and decode data",
+						prompt:
+							"Create a Product schema with name (string), price (positive number), and inStock (boolean). Decode an unknown object using Schema.decodeUnknown inside Effect.gen.",
+						startCode: `import { Schema, Effect } from "effect"
+
+// TODO: Define a Product schema with:
+// - name: string
+// - price: positive number
+// - inStock: boolean
+
+// TODO: Extract the TypeScript type
+
+// TODO: Decode this object using Schema.decodeUnknown in Effect.gen
+const data = { name: "Widget", price: 9.99, inStock: true }`,
+						solution: `import { Schema, Effect } from "effect"
+
+const Product = Schema.Struct({
+  name: Schema.String,
+  price: Schema.Number.pipe(Schema.positive()),
+  inStock: Schema.Boolean
+})
+
+type Product = typeof Product.Type
+
+const program = Effect.gen(function* () {
+  const product = yield* Schema.decodeUnknown(Product)(data)
+  return product // Product type — fully typed
+})
+
+const data = { name: "Widget", price: 9.99, inStock: true }`,
+					},
+					{
+						title: "Handle decode errors",
+						prompt:
+							"Decode invalid data with Schema.decodeUnknown and catch the ParseError. Log a message when decoding fails.",
+						startCode: `import { Schema, Effect } from "effect"
+
+const Age = Schema.Number.pipe(Schema.int(), Schema.positive())
+
+// TODO: Try to decode the string "not a number" with Schema.decodeUnknown(Age)
+// TODO: Catch the error and log "Invalid age"`,
+						solution: `import { Schema, Effect } from "effect"
+
+const Age = Schema.Number.pipe(Schema.int(), Schema.positive())
+
+const program = Schema.decodeUnknown(Age)("not a number").pipe(
+  Effect.catchTag("ParseError", () =>
+    Effect.sync(() => console.log("Invalid age"))
+  )
+)`,
+					},
+					{
+						title: "Use optional fields with defaults",
+						prompt:
+							"Create a Config schema where port is optional (defaults to 3000) and host is optional (defaults to 'localhost'). Decode an empty object and verify the defaults.",
+						startCode: `import { Schema } from "effect"
+
+// TODO: Create a Config schema where:
+// - port: optional number, defaults to 3000
+// - host: optional string, defaults to "localhost"
+
+// TODO: Decode {} and verify you get { port: 3000, host: "localhost" }`,
+						solution: `import { Schema } from "effect"
+
+const Config = Schema.Struct({
+  port: Schema.optionalWith(Schema.Number, { default: () => 3000 }),
+  host: Schema.optionalWith(Schema.String, { default: () => "localhost" })
+})
+
+const result = Schema.decodeUnknownSync(Config)({})
+// { port: 3000, host: "localhost" }`,
+					},
+				],
 			},
 			{
 				id: 15,
@@ -2295,29 +2457,267 @@ const result = yield* parse(apiResponse)`,
 				tweet: false,
 				duration: "45 min",
 				content:
-					"Level up from basic schemas to class-based schemas, branded types, and transformations.",
+					"In TypeScript you define classes, interfaces, and validation separately. Schema classes unify all three: a class with built-in schema, type inference, structural equality, and constructor validation. Branded types solve a classic TS problem — preventing string-typed IDs from being mixed up. Transformations handle the \"API sends snake_case but I want camelCase\" problem bidirectionally.",
 				keyIdea:
-					"Schema classes combine schema + class definition. Branded types prevent mixing up primitives (UserId vs PostId). Transformations let you decode into different shapes.",
+					"Schema classes combine schema + class definition. Branded types prevent mixing up primitives (UserId vs PostId). Transformations let you decode into different shapes and encode back.",
 				concepts: [
 					{
-						name: 'Schema.Class<Self>("Tag")({fields})',
-						desc: "Creates a class with built-in schema, structural equality, and a _tag. Also see Schema.TaggedClass for auto _tag field.",
+						name: 'class Foo extends Schema.Class<Foo>("Foo")({fields})',
+						desc: "Creates a class with built-in schema, structural equality, and constructor validation.",
+					},
+					{
+						name: 'Schema.TaggedClass<Self>("Tag")({fields})',
+						desc: "Like Schema.Class but auto-adds a _tag field. Great for discriminated unions.",
+					},
+					{
+						name: 'Schema.TaggedError<Self>("Tag")({fields})',
+						desc: "Defines a typed error with _tag + schema. Use as your E type in Effect<A, E, R>.",
 					},
 					{
 						name: "Schema.brand('UserId')",
-						desc: "Creates a branded type. UserId is a string at runtime but a unique type at compile time.",
+						desc: "Creates a branded type. UserId is a string at runtime but a unique type at compile time. Prevents mixing up IDs.",
 					},
 					{
-						name: "Schema.transform(from, to, { ... })",
-						desc: "Transforms between two schemas. Bidirectional: decode and encode.",
+						name: "Schema.transform(from, to, { decode, encode })",
+						desc: "Pure bidirectional transform between two schemas.",
+					},
+					{
+						name: "Schema.transformOrFail(from, to, { decode, encode })",
+						desc: "Effectful transform — decode/encode can fail with ParseError.",
 					},
 					{
 						name: "Schema.filter(predicate)",
-						desc: "Adds validation to a schema. Like z.refine().",
+						desc: "Adds validation to a schema. Like z.refine(). Returns a ParseError on failure.",
+					},
+					{
+						name: "Schema.withConstructorDefault(() => value)",
+						desc: "Sets a default for class constructors. Field is required in decode but optional in new Foo().",
 					},
 				],
 				docsLink: "https://effect.website/docs/schema/classes/",
-				trap: "Schema classes are NOT regular TS classes. They have structural equality (two instances with same data are equal) and a _tag. Don't add mutable state to them.",
+				trap: "Schema classes are NOT regular TS classes. They have structural equality (two instances with same data are equal) and a _tag. Don't add mutable state to them — treat them as immutable data.",
+				tsCode: `// TypeScript: separate class, validation, and type definitions
+interface UserData {
+  id: string
+  name: string
+  createdAt: string  // ISO string from API
+}
+
+class User {
+  readonly id: string
+  readonly name: string
+  readonly createdAt: Date  // Parsed to Date internally
+
+  constructor(data: UserData) {
+    // Manual validation
+    if (!data.id) throw new Error("id required")
+    if (!data.name) throw new Error("name required")
+    this.id = data.id
+    this.name = data.name
+    this.createdAt = new Date(data.createdAt)  // Manual transform
+  }
+}
+
+// Problems:
+// - No type-safe error handling (throws generic Error)
+// - No encode back to API format
+// - UserId and PostId are both just "string" — easy to mix up
+// - Two users with same data are !== (reference equality)
+type UserId = string   // ← nothing stops you passing a PostId here
+type PostId = string`,
+				code: `import { Schema } from "effect"
+
+// ── Schema.Class: schema + class in one ──
+class User extends Schema.Class<User>("User")({
+  id: Schema.String,
+  name: Schema.NonEmptyString,
+  createdAt: Schema.Date         // decodes ISO string → Date, encodes Date → string
+}) {
+  // Access fields via this — just like a normal class
+  greet(): string {
+    return \`Hi, I'm \${this.name} (id: \${this.id})\`
+  }
+
+  get displayName(): string {
+    return this.name.toUpperCase()
+  }
+}
+
+const user = new User({ id: "1", name: "Alice", createdAt: new Date() })
+user.name         // "Alice" — access fields directly
+user.greet()      // "Hi, I'm Alice (id: 1)"
+user.displayName  // "ALICE"
+// ✓ Constructor validates fields
+// ✓ Structural equality: new User({...}) === new User({...}) if same data
+
+// ── Schema.TaggedClass: auto _tag for discriminated unions ──
+class Circle extends Schema.TaggedClass<Circle>()("Circle", {
+  radius: Schema.Number
+}) {}
+
+class Square extends Schema.TaggedClass<Square>()("Square", {
+  side: Schema.Number
+}) {}
+
+const Shape = Schema.Union(Circle, Square)
+type Shape = typeof Shape.Type
+// { _tag: "Circle", radius: number } | { _tag: "Square", side: number }
+
+// ── Schema.TaggedError: typed errors with schema ──
+class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {
+  message: Schema.String,
+  resourceId: Schema.String
+}) {}
+// Use: Effect<User, NotFound, Deps>
+
+// ── Branded types: prevent ID mixups ──
+const UserId = Schema.String.pipe(Schema.brand("UserId"))
+const PostId = Schema.String.pipe(Schema.brand("PostId"))
+type UserId = typeof UserId.Type  // string & Brand<"UserId">
+type PostId = typeof PostId.Type  // string & Brand<"PostId">
+
+// const oops: UserId = "abc" as PostId  // ← compile error!
+
+// ── Transform: different shapes for decode vs encode ──
+const DateFromString = Schema.transform(
+  Schema.String,                              // encoded (API)
+  Schema.DateFromSelf,                        // decoded (app)
+  {
+    strict: true,
+    decode: (s) => new Date(s),               // string → Date
+    encode: (d) => d.toISOString()            // Date → string
+  }
+)
+
+// ── Constructor defaults ──
+class Post extends Schema.Class<Post>("Post")({
+  title: Schema.String,
+  published: Schema.Boolean.pipe(
+    Schema.propertySignature,
+    Schema.withConstructorDefault(() => false)  // optional in constructor
+  ),
+  createdAt: Schema.Number.pipe(
+    Schema.propertySignature,
+    Schema.withConstructorDefault(() => Date.now())
+  )
+}) {}
+
+const post = new Post({ title: "Hello" })
+// { title: "Hello", published: false, createdAt: 1712345678901 }`,
+				diagram: `  Regular TS class              Schema.Class
+  ────────────────              ────────────
+
+  class User {                  class User extends Schema.Class<User>("User")({
+    id: string                    id: Schema.String,
+    name: string                  name: Schema.String,
+  }                             }) {}
+
+  Manual validation             ✓ Constructor validates automatically
+  Reference equality            ✓ Structural equality
+  No serialization              ✓ Encode/decode built-in
+  No _tag                       ✓ _tag for discriminated unions (TaggedClass)
+
+  Branded types:
+  ──────────────
+  type UserId = string          const UserId = Schema.String.pipe(Schema.brand("UserId"))
+  type PostId = string          const PostId = Schema.String.pipe(Schema.brand("PostId"))
+
+  fn(userId: string) ← accepts any string     fn(id: UserId) ← only UserId
+  fn(postId)         ← no error!              fn(postId)     ← compile error!
+
+  TaggedError:
+  ────────────
+  class NotFound extends Error { ... }         class NotFound extends Schema.TaggedError<NotFound>()
+                                                 ("NotFound", { id: Schema.String }) {}
+  try/catch (no type info)                     Effect<A, NotFound> (typed in E)`,
+				practice: [
+					{
+						title: "Create a Schema.Class with TaggedError",
+						prompt:
+							"Define a User class using Schema.Class with id (string), name (non-empty string), and email (string). Define a UserNotFound error using Schema.TaggedError with a userId field.",
+						startCode: `import { Schema, Effect } from "effect"
+
+// TODO: Define User with Schema.Class
+// Fields: id (string), name (non-empty string), email (string)
+
+// TODO: Define UserNotFound with Schema.TaggedError
+// Fields: userId (string)
+
+// TODO: Write a function that returns Effect<User, UserNotFound>`,
+						solution: `import { Schema, Effect } from "effect"
+
+class User extends Schema.Class<User>("User")({
+  id: Schema.String,
+  name: Schema.NonEmptyString,
+  email: Schema.String
+}) {}
+
+class UserNotFound extends Schema.TaggedError<UserNotFound>()("UserNotFound", {
+  userId: Schema.String
+}) {}
+
+const findUser = (id: string): Effect.Effect<User, UserNotFound> =>
+  id === "1"
+    ? Effect.succeed(new User({ id: "1", name: "Alice", email: "alice@example.com" }))
+    : Effect.fail(new UserNotFound({ userId: id }))`,
+					},
+					{
+						title: "Use branded types to prevent ID mixups",
+						prompt:
+							"Create UserId and PostId branded types from Schema.String. Write a findUser function that accepts only UserId. Verify that passing a PostId causes a type error.",
+						startCode: `import { Schema } from "effect"
+
+// TODO: Create UserId and PostId branded types
+
+// TODO: Write findUser that only accepts UserId
+
+// TODO: Show that passing a PostId would be a compile error`,
+						solution: `import { Schema, Effect } from "effect"
+
+const UserId = Schema.String.pipe(Schema.brand("UserId"))
+const PostId = Schema.String.pipe(Schema.brand("PostId"))
+type UserId = typeof UserId.Type
+type PostId = typeof PostId.Type
+
+const findUser = (id: UserId): Effect.Effect<string> =>
+  Effect.succeed(\`User \${id}\`)
+
+// Correct usage:
+const userId = Schema.decodeUnknownSync(UserId)("user-123")
+findUser(userId)  // ✓ compiles
+
+// Type error:
+// const postId = Schema.decodeUnknownSync(PostId)("post-456")
+// findUser(postId)  // ✗ Argument of type 'PostId' is not assignable to 'UserId'`,
+					},
+					{
+						title: "Build a discriminated union with TaggedClass",
+						prompt:
+							"Create Circle and Rectangle tagged classes. Create a Shape union. Decode an object with _tag: 'Circle' and radius: 5.",
+						startCode: `import { Schema } from "effect"
+
+// TODO: Define Circle with TaggedClass (field: radius)
+// TODO: Define Rectangle with TaggedClass (fields: width, height)
+// TODO: Create Shape = Schema.Union(Circle, Rectangle)
+// TODO: Decode { _tag: "Circle", radius: 5 }`,
+						solution: `import { Schema } from "effect"
+
+class Circle extends Schema.TaggedClass<Circle>()("Circle", {
+  radius: Schema.Number
+}) {}
+
+class Rectangle extends Schema.TaggedClass<Rectangle>()("Rectangle", {
+  width: Schema.Number,
+  height: Schema.Number
+}) {}
+
+const Shape = Schema.Union(Circle, Rectangle)
+type Shape = typeof Shape.Type
+
+const shape = Schema.decodeUnknownSync(Shape)({ _tag: "Circle", radius: 5 })
+// Circle { _tag: "Circle", radius: 5 }`,
+					},
+				],
 			},
 			{
 				id: 16,
@@ -2326,9 +2726,9 @@ const result = yield* parse(apiResponse)`,
 				tweet: false,
 				duration: "30 min",
 				content:
-					"Effect provides Option (for nullable values) and Either (for branching results) as data types with full API support.",
+					"In TypeScript you use null/undefined for absence and union types for branching — but they don't compose and are easy to forget. Option makes absence explicit: Some(value) or None. Either gives you type-safe branching: Right(success) or Left(failure). Both are plain data (not Effects) with a rich API for mapping, chaining, and matching. They bridge to existing TS code with fromNullable/getOrNull.",
 				keyIdea:
-					"Option replaces null/undefined with explicit Some(value) or None. Either<Right, Left> gives you a type-safe union of two outcomes. Both compose with pipe and match.",
+					"Option replaces null/undefined with explicit Some(value) or None. Either<Right, Left> gives you a type-safe union of two outcomes. Both compose with pipe and match. They're data containers, not Effects.",
 				concepts: [
 					{
 						name: "Option.some(value) / Option.none()",
@@ -2336,19 +2736,233 @@ const result = yield* parse(apiResponse)`,
 					},
 					{
 						name: "Option.fromNullable(value)",
-						desc: "Converts null | undefined to Option. Bridges to existing code.",
+						desc: "Converts null | undefined to None, everything else to Some. Bridges to existing code.",
+					},
+					{
+						name: "Option.map(fn) / Option.flatMap(fn)",
+						desc: "Transform the value inside Some. flatMap returns Option (can go from Some to None).",
+					},
+					{
+						name: "Option.getOrElse(() => fallback)",
+						desc: "Unwrap with a fallback for None. Like ?? in TypeScript but composable.",
+					},
+					{
+						name: "Option.getOrNull / getOrUndefined",
+						desc: "Convert back to nullable for interop with existing TS code.",
 					},
 					{
 						name: "Either.right(value) / Either.left(error)",
 						desc: "Creates an Either. Right = success, Left = failure (by convention).",
 					},
 					{
+						name: "Either.map / Either.mapLeft",
+						desc: "Transform the Right (success) or Left (error) side independently.",
+					},
+					{
 						name: "Option.match / Either.match",
-						desc: "Pattern match to handle both cases explicitly.",
+						desc: "Pattern match to handle both cases explicitly. Exhaustive — can't forget a case.",
+					},
+					{
+						name: "Option.isSome / Option.isNone",
+						desc: "Type guards. Narrow the type in if statements.",
 					},
 				],
 				docsLink: "https://effect.website/docs/data-types/option/",
-				trap: "Option and Effect are different! Option is a simple data container. Effect is a lazy computation. Don't confuse Effect.succeed(Option.some(x)) with just Option.some(x).",
+				trap: "Option and Effect are different! Option is a simple data container (like a box). Effect is a lazy computation (like a recipe). Don't confuse Effect.succeed(Option.some(x)) with just Option.some(x). Option is for data you already have; Effect is for work you want to do.",
+				tsCode: `// TypeScript: null/undefined — implicit, easy to forget
+function findUser(id: string): User | null {
+  return db.get(id) ?? null
+}
+
+const user = findUser("123")
+// Oops — forgot to check for null!
+console.log(user.name) // 💥 runtime error
+
+// TypeScript: union types for branching
+type Result = { ok: true; data: User } | { ok: false; error: string }
+function fetchUser(id: string): Result { ... }
+
+const result = fetchUser("123")
+if (result.ok) {
+  result.data  // User
+} else {
+  result.error // string
+}
+// Works, but:
+// - No standard API (map, flatMap, match)
+// - Every team invents their own Result type
+// - Doesn't compose with pipe`,
+				code: `import { Option, Either, pipe } from "effect"
+
+// ── Option: explicit absence ──
+const user: Option.Option<User> = Option.fromNullable(db.get("123"))
+// Option.some({ name: "Alice" }) or Option.none()
+
+// Transform with map (only runs on Some)
+const name = user.pipe(
+  Option.map((u) => u.name),
+  Option.getOrElse(() => "Anonymous")
+)
+// "Alice" or "Anonymous"
+
+// Chain with flatMap (can return None)
+const email = user.pipe(
+  Option.flatMap((u) => Option.fromNullable(u.email)),
+  Option.getOrElse(() => "no-email")
+)
+
+// Pattern match — exhaustive, can't forget a case
+const greeting = Option.match(user, {
+  onNone: () => "Hello, stranger",
+  onSome: (u) => \`Hello, \${u.name}\`
+})
+
+// Interop: convert back to nullable
+const nullable: User | null = Option.getOrNull(user)
+
+// Type guards
+if (Option.isSome(user)) {
+  user.value.name  // narrowed to User
+}
+
+// ── Either: explicit branching ──
+const parsed: Either.Either<number, string> = pipe(
+  "42",
+  (s) => {
+    const n = parseInt(s)
+    return isNaN(n)
+      ? Either.left("not a number")   // Left = failure
+      : Either.right(n)                // Right = success
+  }
+)
+
+// Transform the success side
+const doubled = parsed.pipe(Either.map((n) => n * 2))
+
+// Transform the error side
+const withContext = parsed.pipe(
+  Either.mapLeft((e) => \`Parse failed: \${e}\`)
+)
+
+// Pattern match
+Either.match(parsed, {
+  onLeft: (err) => console.log(\`Error: \${err}\`),
+  onRight: (val) => console.log(\`Value: \${val}\`)
+})`,
+				diagram: `  TypeScript                      Effect
+  ──────────                      ──────
+
+  null / undefined                Option.none()
+  value                           Option.some(value)
+  value ?? fallback               Option.getOrElse(() => fallback)
+  value?.property                 Option.map((v) => v.property)
+  if (value != null)              if (Option.isSome(opt))
+  value!                          Option.getOrThrowWith(...)
+
+  { ok, data } | { err }         Either.right(data) | Either.left(err)
+
+  Composability:
+  ──────────────
+  // TypeScript — manual null checks at every step
+  const a = getA()           // A | null
+  const b = a ? getB(a) : null
+  const c = b ? getC(b) : null
+
+  // Option — flatMap chains, None short-circuits
+  const c = pipe(
+    getA(),                   // Option<A>
+    Option.flatMap(getB),     // Option<B> — None if A was None
+    Option.flatMap(getC),     // Option<C> — None if B was None
+  )
+
+  Option vs Effect:
+  ─────────────────
+  Option.some(42)     → data container (value exists NOW)
+  Effect.succeed(42)  → lazy computation (value produced LATER)`,
+				practice: [
+					{
+						title: "Replace null checks with Option",
+						prompt:
+							"Convert this TypeScript function to use Option. Chain two lookups with flatMap.",
+						startCode: `import { Option, pipe } from "effect"
+
+// Original TypeScript:
+// function getUserEmail(id: string): string | null {
+//   const user = db.get(id)        // User | null
+//   if (!user) return null
+//   const email = user.email       // string | null
+//   if (!email) return null
+//   return email
+// }
+
+// TODO: Rewrite using Option.fromNullable and Option.flatMap`,
+						solution: `import { Option, pipe } from "effect"
+
+const getUserEmail = (id: string): Option.Option<string> =>
+  pipe(
+    Option.fromNullable(db.get(id)),
+    Option.flatMap((user) => Option.fromNullable(user.email))
+  )
+
+// Usage:
+const email = getUserEmail("123").pipe(
+  Option.getOrElse(() => "no-email@example.com")
+)`,
+					},
+					{
+						title: "Use Either for validation",
+						prompt:
+							"Write a parseAge function that returns Either<number, string>. Left if the input isn't a valid positive integer, Right if it is. Use Either.map to double the age.",
+						startCode: `import { Either, pipe } from "effect"
+
+// TODO: Write parseAge(input: string): Either<number, string>
+// - Left("not a number") if parseInt fails
+// - Left("must be positive") if <= 0
+// - Right(age) if valid
+
+// TODO: Use Either.map to double the result`,
+						solution: `import { Either, pipe } from "effect"
+
+const parseAge = (input: string): Either.Either<number, string> => {
+  const n = parseInt(input)
+  if (isNaN(n)) return Either.left("not a number")
+  if (n <= 0) return Either.left("must be positive")
+  return Either.right(n)
+}
+
+const doubled = parseAge("21").pipe(
+  Either.map((age) => age * 2)
+)
+// Either.right(42)
+
+const invalid = parseAge("abc").pipe(
+  Either.map((age) => age * 2)
+)
+// Either.left("not a number") — map is skipped`,
+					},
+					{
+						title: "Pattern match with Option.match",
+						prompt:
+							"Use Option.match to render a greeting. If the user exists, greet them by name. If not, show 'Hello, guest'.",
+						startCode: `import { Option } from "effect"
+
+type User = { name: string }
+const currentUser: Option.Option<User> = Option.fromNullable(getUser())
+
+// TODO: Use Option.match to produce:
+// - "Hello, guest" when None
+// - "Hello, {name}" when Some`,
+						solution: `import { Option } from "effect"
+
+type User = { name: string }
+const currentUser: Option.Option<User> = Option.fromNullable(getUser())
+
+const greeting = Option.match(currentUser, {
+  onNone: () => "Hello, guest",
+  onSome: (user) => \`Hello, \${user.name}\`
+})`,
+					},
+				],
 			},
 		],
 	},
