@@ -23,6 +23,7 @@ export interface Step {
 	trap: string;
 	tsCode?: string;
 	code?: string;
+	diagram?: string;
 	practice?: Practice[];
 }
 
@@ -1466,6 +1467,37 @@ program.pipe(
   }),
   Effect.runPromise
 )`,
+				diagram: `  TS interface                     Effect Service
+  ─────────────                    ──────────────
+  interface Logger {               class Logger extends
+    log(msg: string): void           Effect.Service<Logger>()("Logger", {
+  }                                    succeed: { log: ... }
+                                     }) {}
+          │                                │
+          │                                ├── Tag (unique identity)
+          │                                ├── .Default (auto Layer)
+          │                                └── R type tracking
+          │                                        │
+          ▼                                        ▼
+  You wire it manually.            Compiler enforces it:
+  Forget? Runtime error.           R ≠ never? Won't compile.
+
+
+  ┌─────────────────────────────────────────────────────────┐
+  │  yield* Logger     ← pulls Logger from context          │
+  │         │                                               │
+  │         └──► adds Logger to R automatically             │
+  │                                                         │
+  │  Effect<void, never, Logger>                            │
+  │                      ^^^^^^                             │
+  │              "this needs a Logger to run"               │
+  │                                                         │
+  │  pipe(Effect.provideService(Logger, impl))              │
+  │                                                         │
+  │  Effect<void, never, never>                             │
+  │                      ^^^^^                              │
+  │              "all dependencies satisfied — can run"     │
+  └─────────────────────────────────────────────────────────┘`,
 				practice: [
 					{
 						title: "Define a service and use it",
@@ -1711,6 +1743,56 @@ const program = Effect.gen(function* () {
 })
 
 Effect.runPromise(Effect.provide(program, MainLive))`,
+				diagram: `  Step 1: Each layer is a recipe
+  ─────────────────────────────────────────────────────
+
+  ConfigLive                    LoggerLive
+  ┌──────────────────┐          ┌──────────────────────┐
+  │ Layer.succeed     │          │ Layer.effect          │
+  │                   │          │                       │
+  │ provides: Config  │          │ provides: Logger      │
+  │ needs:    nothing │          │ needs:    Config  ←── │── "I can't build
+  └──────────────────┘          └──────────────────────┘     without Config"
+
+
+  Step 2: Resolve dependencies (Layer.provide)
+  ─────────────────────────────────────────────────────
+
+  LoggerLive.pipe(Layer.provide(ConfigLive))
+                        │
+               "here's the Config you need"
+                        │
+                        ▼
+               LoggerResolved
+               ┌──────────────────────┐
+               │ provides: Logger      │
+               │ needs:    nothing ✓   │
+               └──────────────────────┘
+
+
+  Step 3: Bundle together (Layer.merge)
+  ─────────────────────────────────────────────────────
+
+  Layer.merge(ConfigLive, LoggerResolved)
+                        │
+                        ▼
+                    AppLive
+               ┌──────────────────────┐
+               │ provides: Config      │
+               │           Logger      │
+               │ needs:    nothing ✓   │
+               └──────────────────────┘
+
+
+  Step 4: Wire to your program (Effect.provide)
+  ─────────────────────────────────────────────────────
+
+  program ──── needs Config + Logger
+      │
+      │  Effect.provide(program, AppLive)
+      │
+      ▼
+  runnable ── needs nothing → Effect.runPromise(runnable)`,
 				practice: [
 					{
 						title: "Use Effect.Service layers (the easy path)",

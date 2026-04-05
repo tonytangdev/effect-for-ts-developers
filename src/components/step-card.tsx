@@ -109,6 +109,21 @@ export function StepCard({ step, phase }: StepCardProps) {
           </div>
         )}
 
+        {/* Diagram */}
+        {step.diagram && (
+          <div className="mb-4">
+            <span
+              className="text-[9px] uppercase tracking-[2px] text-text-muted block mb-2 font-semibold"
+            >
+              How it works
+            </span>
+            <pre
+              className="bg-bg-elevated border border-border p-4 text-[11px] leading-relaxed text-text overflow-x-auto"
+              style={{ borderLeft: `3px solid ${phase.phaseColor}` }}
+            >{step.diagram}</pre>
+          </div>
+        )}
+
         {/* Practice exercises */}
         {step.practice && step.practice.length > 0 && (
           <div className="mb-4">
