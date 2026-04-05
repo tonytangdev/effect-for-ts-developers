@@ -1371,19 +1371,27 @@ const getUser = (id: string) => Effect.gen(function* () {
 				title: "Services & Context",
 				subtitle: "The R in Effect<A, E, R>",
 				tweet: true,
-				duration: "60 min",
+				duration: "15 min",
 				content:
-					"The R type parameter tracks what an Effect NEEDS to run. This is Effect's built-in dependency injection — no framework needed.",
+					"The R type parameter tracks what an Effect NEEDS to run. This is Effect's built-in dependency injection — no framework needed. In TypeScript you'd wire dependencies manually or use a DI container. Effect makes dependencies part of the type system.",
 				keyIdea:
-					"Use Effect.Service to define services as classes with auto-generated layers. The R type ensures you provide all dependencies before running.",
+					"Use Effect.Service to define services as classes with auto-generated layers. The R type ensures you provide all dependencies before running — the compiler is your DI container.",
 				concepts: [
 					{
 						name: "Effect.Service",
-						desc: "Defines a service as a class with tag, implementation, and auto-generated layers (Default, DefaultWithoutDependencies).",
+						desc: "Defines a service as a class with tag, implementation, and auto-generated layers (Default, DefaultWithoutDependencies). The recommended way to create services.",
 					},
 					{
 						name: "R type parameter",
-						desc: "Accumulates required services. Effect<User, Error, Database | Logger> needs both Database and Logger.",
+						desc: "Accumulates required services. Effect<User, Error, Database | Logger> needs both Database and Logger provided before it can run.",
+					},
+					{
+						name: "yield* ServiceTag",
+						desc: "Inside Effect.gen, yield* MyService pulls the service from context. Type-safe — the compiler adds it to R automatically.",
+					},
+					{
+						name: "Context.GenericTag",
+						desc: "Lower-level API to create a service tag without Effect.Service. Useful for simple services or understanding what Effect.Service abstracts.",
 					},
 					{
 						name: "dependencies option",
@@ -1391,28 +1399,174 @@ const getUser = (id: string) => Effect.gen(function* () {
 					},
 					{
 						name: "Effect.provideService(tag, impl)",
-						desc: "Provides one service implementation. Removes it from R.",
+						desc: "Provides one service implementation inline. Removes it from R. Great for tests.",
 					},
 				],
 				docsLink:
 					"https://effect.website/docs/requirements-management/services/",
-				trap: "The R type is like a checklist. The compiler won't let you run an Effect until R = never (all dependencies provided). This is the key insight.",
-				code: `class Database extends Effect.Service<Database>()("Database", {
+				trap: "The R type is like a checklist. The compiler won't let you run an Effect until R = never (all dependencies provided). If you see a type error about missing services, you forgot to provide something — not a bug, a feature.",
+				tsCode: `// TypeScript: manual dependency wiring
+interface Database {
+  query(sql: string): Promise<unknown[]>
+}
+
+function createDatabase(pool: Pool): Database {
+  return { query: (sql) => pool.query(sql) }
+}
+
+// Caller must remember to pass the right pool.
+// Nothing prevents passing the wrong one.
+// Nothing tracks which functions need a Database.
+const db = createDatabase(pool)
+const users = await db.query("SELECT * FROM users")`,
+				code: `import { Effect, Context } from "effect"
+
+// === Option 1: Effect.Service (recommended) ===
+class Database extends Effect.Service<Database>()("Database", {
   effect: Effect.gen(function* () ({
-    query: (sql: string) => Effect.tryPromise(() => db.query(sql))
+    query: (sql: string) => Effect.tryPromise(() => pool.query(sql))
   })),
-  dependencies: [ConnectionPool.Default] // auto-wired
+  dependencies: [ConnectionPool.Default]
 }) {}
 
-// Auto-generated layers:
+// Auto-generated:
 // Database.Default — includes all dependencies
 // Database.DefaultWithoutDependencies — requires them externally
 
 const getUsers = Effect.gen(function* () {
-  const db = yield* Database  // pulls from context
+  const db = yield* Database  // pulls from context, adds Database to R
   return yield* db.query("SELECT * FROM users")
 })
-// Type: Effect<User[], SqlError, Database>`,
+// Type: Effect<User[], SqlError, Database>
+
+// === Option 2: Context.GenericTag (lower-level) ===
+interface Logger {
+  readonly log: (msg: string) => Effect.Effect<void>
+}
+const Logger = Context.GenericTag<Logger>("Logger")
+
+const program = Effect.gen(function* () {
+  const logger = yield* Logger
+  yield* logger.log("hello")
+})
+// Type: Effect<void, never, Logger>
+
+// Provide and run
+program.pipe(
+  Effect.provideService(Logger, {
+    log: (msg) => Effect.sync(() => console.log(msg))
+  }),
+  Effect.runPromise
+)`,
+				practice: [
+					{
+						title: "Define a service and use it",
+						prompt:
+							"Create a Clock service using Effect.Service that has a single method `now` returning an Effect with the current timestamp. Then write a program that uses the service.",
+						startCode: `import { Effect } from "effect"
+
+// TODO: Define a Clock service with Effect.Service
+// It should have a method: now: () => Effect.Effect<number>
+// Use Effect.sync(() => Date.now()) in the implementation
+
+// TODO: Write a program that uses Clock to get the current time
+// const program = Effect.gen(function* () { ... })`,
+						solution: `import { Effect } from "effect"
+
+class Clock extends Effect.Service<Clock>()("Clock", {
+  succeed: {
+    now: () => Effect.sync(() => Date.now())
+  }
+}) {}
+
+const program = Effect.gen(function* () {
+  const clock = yield* Clock
+  const time = yield* clock.now()
+  return time
+})
+// Type: Effect<number, never, Clock>
+
+// Run it:
+// program.pipe(Effect.provide(Clock.Default), Effect.runPromise)`,
+					},
+					{
+						title: "Swap a service for testing",
+						prompt:
+							"Given the Clock service below, provide a fake implementation that always returns 0. Use Effect.provideService to swap the real implementation for a test one.",
+						startCode: `import { Effect } from "effect"
+
+class Clock extends Effect.Service<Clock>()("Clock", {
+  succeed: {
+    now: () => Effect.sync(() => Date.now())
+  }
+}) {}
+
+const program = Effect.gen(function* () {
+  const clock = yield* Clock
+  return yield* clock.now()
+})
+
+// TODO: provide a fake Clock that always returns 0
+// and run the program
+const test = program.pipe(
+  // your code here
+)`,
+						solution: `import { Effect } from "effect"
+
+class Clock extends Effect.Service<Clock>()("Clock", {
+  succeed: {
+    now: () => Effect.sync(() => Date.now())
+  }
+}) {}
+
+const program = Effect.gen(function* () {
+  const clock = yield* Clock
+  return yield* clock.now()
+})
+
+const test = program.pipe(
+  Effect.provideService(Clock, {
+    now: () => Effect.succeed(0)
+  }),
+  Effect.runPromise
+)
+// test resolves to 0 — no real clock involved`,
+					},
+					{
+						title: "Use Context.GenericTag",
+						prompt:
+							"Create a Random service using Context.GenericTag (not Effect.Service). Define the interface, the tag, a program that uses it, and provide an implementation.",
+						startCode: `import { Effect, Context } from "effect"
+
+// TODO: Define a Random interface with:
+//   next: () => Effect.Effect<number>
+
+// TODO: Create a tag with Context.GenericTag
+
+// TODO: Write a program that calls random.next()
+
+// TODO: Provide an implementation and run it`,
+						solution: `import { Effect, Context } from "effect"
+
+interface Random {
+  readonly next: () => Effect.Effect<number>
+}
+const Random = Context.GenericTag<Random>("Random")
+
+const program = Effect.gen(function* () {
+  const random = yield* Random
+  return yield* random.next()
+})
+// Type: Effect<number, never, Random>
+
+const result = program.pipe(
+  Effect.provideService(Random, {
+    next: () => Effect.sync(() => Math.random())
+  }),
+  Effect.runPromise
+)`,
+					},
+				],
 			},
 			{
 				id: 12,
