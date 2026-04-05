@@ -2973,34 +2973,395 @@ const greeting = Option.match(currentUser, {
 		steps: [
 			{
 				id: 17,
-				title: "Logging, Metrics, Tracing",
-				subtitle: "Built-in observability",
+				title: "Structured Logging",
+				subtitle: "From console.log to composable logs",
 				tweet: false,
-				duration: "45 min",
+				duration: "40 min",
 				content:
-					"Effect has first-class logging, metrics, and tracing — no additional libraries needed.",
+					"In TypeScript you scatter console.log calls everywhere, lose context in production, and bolt on Winston/Pino as an afterthought. Effect treats logging as a first-class Effect — composable, structured, annotated, and swappable without changing application code.",
 				keyIdea:
-					"Effect.log is an Effect (it composes). Spans create traces. Metrics are type-safe counters/histograms. All integrate with the service system so you can swap implementations.",
+					"Effect.log is an Effect, not a side effect. It composes in pipes and generators, carries structured data, and the logger implementation is a service you can swap via Layers — no code changes needed to go from dev console to production JSON to OpenTelemetry.",
 				concepts: [
 					{
-						name: "Effect.log / logDebug / logWarning / logError",
-						desc: "Structured logging. It's an Effect, so it composes with pipe and gen.",
+						name: "Effect.log / logDebug / logInfo / logWarning / logError / logFatal",
+						desc: "Log at different levels. Each returns an Effect — you must yield* or pipe it. Default level is INFO (logDebug is hidden unless you change the minimum).",
 					},
 					{
-						name: "Effect.withSpan('name')",
-						desc: "Wraps an Effect in a tracing span. Automatic parent-child relationships.",
+						name: "Logger.withMinimumLogLevel",
+						desc: "Controls which log levels are visible. Wrap an effect to filter noise: pipe(myEffect, Logger.withMinimumLogLevel(LogLevel.Debug)).",
 					},
 					{
-						name: "Effect.annotateCurrentSpan",
-						desc: "Adds metadata to the current span.",
+						name: "Effect.annotateLogs",
+						desc: "Attaches key-value pairs to every log within a scope. Think of it like adding context (userId, requestId) that flows through all nested logs automatically.",
 					},
 					{
-						name: "Metric.counter / histogram / gauge",
-						desc: "Type-safe metrics that integrate with your Effect pipeline.",
+						name: "Effect.withLogSpan('label')",
+						desc: "Wraps a section of code in a named timing span. Logs inside show elapsed time — useful for performance debugging without manual Date.now() bookkeeping.",
+					},
+					{
+						name: "Logger.replace / Logger.none",
+						desc: "Swap the logger implementation via Layers. Logger.none silences all logs (great for tests). You can provide a custom JSON logger for production.",
 					},
 				],
 				docsLink: "https://effect.website/docs/observability/logging/",
-				trap: "Effect.log returns an Effect — you must yield* it or include it in a pipe. console.log works in Effect.gen but loses all the structured logging benefits.",
+				trap: "Effect.log returns an Effect — you must yield* it or include it in a pipe. console.log works inside Effect.gen but loses all structured logging benefits (no levels, no annotations, no spans, can't be swapped).",
+				tsCode: `// TypeScript: scattered console.log, no structure
+function processOrder(order: Order) {
+  console.log("Processing order", order.id)
+  try {
+    const result = chargeCard(order)
+    console.log("Order processed", order.id, result)
+    return result
+  } catch (err) {
+    console.error("Order failed", order.id, err)
+    throw err
+  }
+}
+
+// Want structured JSON logs? Install winston/pino,
+// create a logger instance, pass it everywhere,
+// update every call site...`,
+				code: `import { Effect, Logger, LogLevel } from "effect"
+
+// ── Logging is an Effect — it composes naturally ──
+const processOrder = (order: Order) =>
+  Effect.gen(function* () {
+    yield* Effect.log("Processing order")
+    const result = yield* chargeCard(order)
+    yield* Effect.log("Order processed")
+    return result
+  }).pipe(
+    // annotations flow to ALL logs inside this scope
+    Effect.annotateLogs("orderId", order.id),
+    Effect.annotateLogs("customer", order.customerId),
+    // timing span — logs show elapsed time
+    Effect.withLogSpan("processOrder")
+  )
+
+// ── Swap the logger without touching application code ──
+// Dev: default pretty logger
+// Test: silence everything
+const testProgram = processOrder(order).pipe(
+  Effect.provide(Logger.none)
+)
+// Prod: set minimum level
+const prodProgram = processOrder(order).pipe(
+  Logger.withMinimumLogLevel(LogLevel.Warning)
+)`,
+				diagram: `  TypeScript                          Effect
+  ─────────────────────────          ─────────────────────────────
+  console.log("msg")                 yield* Effect.log("msg")
+  │                                  │
+  ├─ fire-and-forget                 ├─ returns Effect (composable)
+  ├─ no levels                       ├─ logDebug/Info/Warning/Error
+  ├─ no structure                    ├─ annotateLogs({ key: val })
+  ├─ hardcoded destination           ├─ withLogSpan("timing")
+  └─ refactor to change              └─ swap via Layer (0 code changes)
+
+  winston.createLogger({...})        Logger layer
+  ├─ import logger everywhere        ├─ provided once at the edge
+  ├─ pass instance around            ├─ flows through all Effects
+  └─ different API per library       └─ same Effect.log everywhere`,
+				practice: [
+					{
+						title: "Add structured logging to a pipeline",
+						prompt:
+							"Add logging to this order processing pipeline. Use appropriate log levels, annotate with the orderId, and wrap in a log span.",
+						startCode: `import { Effect } from "effect"
+
+interface Order { id: string; amount: number }
+
+const validateOrder = (order: Order) =>
+  order.amount > 0
+    ? Effect.succeed(order)
+    : Effect.fail("Invalid amount")
+
+const chargeCard = (order: Order) =>
+  Effect.succeed({ transactionId: "tx_123" })
+
+// TODO: Add logging, annotations, and a log span
+const processOrder = (order: Order) =>
+  Effect.gen(function* () {
+    const validated = yield* validateOrder(order)
+    const result = yield* chargeCard(validated)
+    return result
+  })`,
+						solution: `import { Effect } from "effect"
+
+interface Order { id: string; amount: number }
+
+const validateOrder = (order: Order) =>
+  order.amount > 0
+    ? Effect.succeed(order)
+    : Effect.fail("Invalid amount")
+
+const chargeCard = (order: Order) =>
+  Effect.succeed({ transactionId: "tx_123" })
+
+const processOrder = (order: Order) =>
+  Effect.gen(function* () {
+    yield* Effect.log("Validating order")
+    const validated = yield* validateOrder(order)
+    yield* Effect.log("Charging card")
+    const result = yield* chargeCard(validated)
+    yield* Effect.log(\`Charged successfully: \${result.transactionId}\`)
+    return result
+  }).pipe(
+    Effect.annotateLogs("orderId", order.id),
+    Effect.withLogSpan("processOrder")
+  )`,
+					},
+					{
+						title: "Silence logs in tests",
+						prompt:
+							"The program below logs heavily. Run it with all logs silenced (for tests), then run it showing only Warning and above (for prod).",
+						startCode: `import { Effect, Logger, LogLevel } from "effect"
+
+const noisyProgram = Effect.gen(function* () {
+  yield* Effect.logDebug("debug details")
+  yield* Effect.log("processing...")
+  yield* Effect.logWarning("disk almost full")
+  return 42
+})
+
+// TODO: Run with no logs (test mode)
+// const testResult = ...
+
+// TODO: Run showing only Warning+ (prod mode)
+// const prodResult = ...`,
+						solution: `import { Effect, Logger, LogLevel } from "effect"
+
+const noisyProgram = Effect.gen(function* () {
+  yield* Effect.logDebug("debug details")
+  yield* Effect.log("processing...")
+  yield* Effect.logWarning("disk almost full")
+  return 42
+})
+
+// Test mode: silence all logs
+const testResult = noisyProgram.pipe(
+  Effect.provide(Logger.none)
+)
+
+// Prod mode: Warning and above only
+const prodResult = noisyProgram.pipe(
+  Logger.withMinimumLogLevel(LogLevel.Warning)
+)`,
+					},
+				],
+			},
+			{
+				id: 18,
+				title: "Tracing, Metrics & Supervision",
+				subtitle: "Spans, counters, and fiber monitoring",
+				tweet: false,
+				duration: "45 min",
+				content:
+					"Distributed tracing and metrics usually require heavy instrumentation libraries and manual plumbing. Effect bakes them in: withSpan creates trace spans, Metric gives you type-safe counters/histograms/gauges, and Supervisor lets you monitor fiber lifecycles — all composable and exportable to OpenTelemetry.",
+				keyIdea:
+					"Effect.withSpan wraps any Effect in a tracing span with automatic parent-child nesting, error capture, and timing. Metrics are declared once and used like Effects. Both integrate with OpenTelemetry for zero-config export to Grafana, Jaeger, Datadog, etc.",
+				concepts: [
+					{
+						name: "Effect.withSpan('name')",
+						desc: "Wraps an Effect in a tracing span. Captures timing, errors, and automatically nests child spans. The most common tracing API you'll use.",
+					},
+					{
+						name: "Effect.annotateCurrentSpan",
+						desc: "Adds key-value attributes to the current span. Like log annotations but for traces — helps filter/search in your tracing backend.",
+					},
+					{
+						name: "Metric.counter('name')",
+						desc: "A monotonically increasing counter (e.g., requests served, errors occurred). Increment with Metric.increment or pipe through your Effect.",
+					},
+					{
+						name: "Metric.histogram('name', { boundaries })",
+						desc: "Tracks value distributions (e.g., response times, payload sizes). Records observations automatically when piped through Effects.",
+					},
+					{
+						name: "Metric.gauge('name')",
+						desc: "A point-in-time value (e.g., active connections, queue depth). Can go up or down unlike counters.",
+					},
+					{
+						name: "Supervisor.track",
+						desc: "Monitors fiber lifecycle (creation and termination). Use with Effect.supervised to observe concurrent work — how many fibers are active, when they finish.",
+					},
+				],
+				docsLink: "https://effect.website/docs/observability/telemetry/tracing/",
+				trap: "Effect.withSpan adds overhead — don't wrap every single function. Use it at meaningful operation boundaries (HTTP handlers, DB queries, external calls). Over-spanning creates noise in your tracing backend.",
+				tsCode: `// TypeScript: manual OpenTelemetry instrumentation
+import { trace } from "@opentelemetry/api"
+
+const tracer = trace.getTracer("my-service")
+
+async function processOrder(order: Order) {
+  // manual span creation — verbose and error-prone
+  const span = tracer.startSpan("processOrder")
+  span.setAttribute("orderId", order.id)
+  try {
+    const result = await chargeCard(order)
+    span.setStatus({ code: SpanStatusCode.OK })
+    return result
+  } catch (err) {
+    span.setStatus({ code: SpanStatusCode.ERROR })
+    span.recordException(err)
+    throw err
+  } finally {
+    span.end() // easy to forget!
+  }
+}
+
+// Metrics: yet another library, separate API
+import { metrics } from "@opentelemetry/api"
+const counter = metrics.getMeter("my-service")
+  .createCounter("orders_processed")
+counter.add(1, { status: "success" })`,
+				code: `import { Effect, Metric } from "effect"
+
+// ── Tracing: just wrap with withSpan ──
+// Attributes live OUTSIDE the business logic via withSpan options
+const processOrder = (order: Order) =>
+  Effect.gen(function* () {
+    const result = yield* chargeCard(order)
+    return result
+  }).pipe(
+    Effect.withSpan("processOrder", {
+      attributes: { orderId: order.id, amount: order.amount }
+    })
+  )
+
+// Use annotateCurrentSpan only when the value is computed INSIDE the generator
+const processOrderDynamic = Effect.gen(function* () {
+  const result = yield* chargeCard(order)
+  // value only known after chargeCard — must annotate here
+  yield* Effect.annotateCurrentSpan("transactionId", result.txId)
+  return result
+}).pipe(Effect.withSpan("processOrder"))
+
+// Nested spans create parent-child traces automatically
+const handleRequest = (req: Request) =>
+  Effect.gen(function* () {
+    const order = yield* parseOrder(req)  // no span
+    const result = yield* processOrder(order) // child span
+    yield* sendConfirmation(order)        // no span
+    return result
+  }).pipe(Effect.withSpan("handleRequest")) // parent span
+
+// ── Metrics: declare once, use in pipelines ──
+const orderCounter = Metric.counter("orders_processed")
+const latencyHistogram = Metric.histogram("order_latency_ms", {
+  boundaries: [10, 50, 100, 500, 1000]
+})
+
+// Increment counter on each order
+const countedOrder = processOrder(order).pipe(
+  Metric.increment(orderCounter)
+)
+
+// Track timing with histogram
+const timedOrder = processOrder(order).pipe(
+  Metric.trackDuration(latencyHistogram)
+)`,
+				diagram: `  TypeScript + OpenTelemetry           Effect
+  ────────────────────────────        ─────────────────────────
+  const span = tracer.startSpan()     Effect.withSpan("name")
+  try { ... }                         │ automatic timing
+  catch { span.recordException() }    │ automatic error capture
+  finally { span.end() }              │ automatic nesting
+  ── 8 lines per span ──              └─ 1 line per span
+
+  Metrics (separate library):          Metric module:
+  meter.createCounter("x")            Metric.counter("x")
+  counter.add(1)                      Metric.increment(counter)
+  ── imperative, manual ──            └─ composable in pipes
+
+  Span hierarchy (same in both):
+  ┌─ handleRequest (400ms) ─────────────────────┐
+  │  ┌─ processOrder (350ms) ──────────────┐    │
+  │  │  ┌─ chargeCard (200ms) ──────┐      │    │
+  │  │  └───────────────────────────┘      │    │
+  │  └─────────────────────────────────────┘    │
+  └─────────────────────────────────────────────┘`,
+				practice: [
+					{
+						title: "Add tracing spans to a pipeline",
+						prompt:
+							"Add tracing spans to this multi-step pipeline. The outer function should have a parent span, and each database call should have its own child span. Pass userId as a span attribute (outside the business logic).",
+						startCode: `import { Effect } from "effect"
+
+const fetchUser = (id: string) =>
+  Effect.succeed({ id, name: "Alice" })
+
+const fetchOrders = (userId: string) =>
+  Effect.succeed([{ id: "order_1", amount: 42 }])
+
+// TODO: Add spans — parent "getUser WithOrders",
+// children "fetchUser" and "fetchOrders"
+// Annotate parent span with userId
+const getUserWithOrders = (userId: string) =>
+  Effect.gen(function* () {
+    const user = yield* fetchUser(userId)
+    const orders = yield* fetchOrders(userId)
+    return { user, orders }
+  })`,
+						solution: `import { Effect } from "effect"
+
+const fetchUser = (id: string) =>
+  Effect.succeed({ id, name: "Alice" }).pipe(
+    Effect.withSpan("fetchUser")
+  )
+
+const fetchOrders = (userId: string) =>
+  Effect.succeed([{ id: "order_1", amount: 42 }]).pipe(
+    Effect.withSpan("fetchOrders")
+  )
+
+const getUserWithOrders = (userId: string) =>
+  Effect.gen(function* () {
+    const user = yield* fetchUser(userId)
+    const orders = yield* fetchOrders(userId)
+    return { user, orders }
+  }).pipe(
+    // attributes outside the business logic
+    Effect.withSpan("getUserWithOrders", {
+      attributes: { userId }
+    })
+  )`,
+					},
+					{
+						title: "Create and use a metric",
+						prompt:
+							"Create a counter metric that tracks how many users are fetched. Wire it so the counter increments every time fetchUser succeeds.",
+						startCode: `import { Effect, Metric } from "effect"
+
+const fetchUser = (id: string) =>
+  Effect.succeed({ id, name: "Alice" })
+
+// TODO: Create a counter metric "users_fetched"
+// TODO: Wire it to fetchUser so it increments on success
+
+const program = Effect.gen(function* () {
+  yield* fetchUser("user_1")
+  yield* fetchUser("user_2")
+  yield* fetchUser("user_3")
+  // counter should be 3 after this
+})`,
+						solution: `import { Effect, Metric } from "effect"
+
+const usersFetched = Metric.counter("users_fetched")
+
+const fetchUser = (id: string) =>
+  Effect.succeed({ id, name: "Alice" }).pipe(
+    Metric.increment(usersFetched)
+  )
+
+const program = Effect.gen(function* () {
+  yield* fetchUser("user_1")
+  yield* fetchUser("user_2")
+  yield* fetchUser("user_3")
+  // counter is now 3
+})`,
+					},
+				],
 			},
 		],
 	},
@@ -3010,7 +3371,7 @@ const greeting = Option.match(currentUser, {
 		phaseColor: "#D5C5D8",
 		steps: [
 			{
-				id: 18,
+				id: 19,
 				title: "Fibers & Basic Concurrency",
 				subtitle: "Lightweight threads for TypeScript",
 				tweet: true,
@@ -3058,7 +3419,7 @@ const greeting = Option.match(currentUser, {
 })`,
 			},
 			{
-				id: 19,
+				id: 20,
 				title: "Queue, Deferred, Semaphore",
 				subtitle: "Coordination primitives",
 				tweet: false,
@@ -3096,7 +3457,7 @@ const greeting = Option.match(currentUser, {
 		phaseColor: "#C8D8C5",
 		steps: [
 			{
-				id: 20,
+				id: 21,
 				title: "Streams & Sinks",
 				subtitle: "Processing data flows",
 				tweet: false,
@@ -3145,7 +3506,7 @@ const greeting = Option.match(currentUser, {
 		phaseColor: "#D8C8C5",
 		steps: [
 			{
-				id: 21,
+				id: 22,
 				title: "Testing with Effect",
 				subtitle: "TestClock, service mocking, and more",
 				tweet: false,
@@ -3172,7 +3533,7 @@ const greeting = Option.match(currentUser, {
 				trap: "Remember: services are interfaces. If you design services as interfaces from the start, testing is trivial. If you hardcode implementations, you lose this power.",
 			},
 			{
-				id: 22,
+				id: 23,
 				title: "Code Style & Patterns",
 				subtitle: "Dual APIs, branded types, pattern matching",
 				tweet: true,
@@ -3210,7 +3571,7 @@ const greeting = Option.match(currentUser, {
 		phaseColor: "#C5C8D8",
 		steps: [
 			{
-				id: 23,
+				id: 24,
 				title: "Configuration",
 				subtitle: "Config, ConfigProvider, secrets",
 				tweet: false,
@@ -3259,7 +3620,7 @@ const test = appConfig.pipe(
 )`,
 			},
 			{
-				id: 24,
+				id: 25,
 				title: "HTTP Client & Server",
 				subtitle: "@effect/platform for HTTP",
 				tweet: true,
@@ -3309,7 +3670,7 @@ const main = fetchTodo(1).pipe(
 )`,
 			},
 			{
-				id: 25,
+				id: 26,
 				title: "FileSystem & Command",
 				subtitle: "@effect/platform for OS interactions",
 				tweet: false,
@@ -3349,7 +3710,7 @@ const processConfig = Effect.gen(function* () {
 }).pipe(Effect.provide(NodeFileSystem.layer))`,
 			},
 			{
-				id: 26,
+				id: 27,
 				title: "SQL & Databases",
 				subtitle: "@effect/sql for type-safe queries",
 				tweet: false,
@@ -3396,7 +3757,7 @@ const transfer = Effect.gen(function* () {
 })`,
 			},
 			{
-				id: 27,
+				id: 28,
 				title: "Real-World Patterns",
 				subtitle: "Putting it all together",
 				tweet: true,
@@ -3463,10 +3824,10 @@ export const TWEET_TEMPLATES: Record<number, string> = {
 	10: `Yieldable errors in @EffectTS_ are genius:\n\nclass NotFound extends Data.TaggedError("NotFound")<{ id: string }> {}\n\nyield* new NotFound({ id })\n\nType-safe "throwing" inside generators. No more stringly-typed errors.\n\n#EffectTS`,
 	11: `Dependency injection in @EffectTS_ is tracked by the TYPE SYSTEM.\n\nEffect<User, DbError, Database | Logger>\n\nThe compiler literally won't let you run this until you provide Database AND Logger.\n\nNo runtime DI container. No decorators. Just types.\n\n#TypeScript`,
 	14: `@effect/schema is what happens when Zod meets bidirectional transforms:\n\n-> decode (validate external data)\n-> encode (serialize for output)\n-> type inference\n\nOne schema definition. Multiple directions.\n\n#EffectTS #TypeScript`,
-	18: `Fibers in @EffectTS_ = lightweight virtual threads for TypeScript\n\nEffect.fork -> start a fiber\nFiber.join -> wait for result\nFiber.interrupt -> cancel (resources auto-cleanup)\n\nOr just: Effect.all(tasks, { concurrency: 10 })\n\n#EffectTS`,
-	22: `Finished the core @EffectTS_ curriculum!\n\nBiggest takeaways:\n- Effect<A, E, R> — one type to rule them all\n- Generators for logic, pipes for behavior\n- Services + Layers = testable by default\n- Schema for validation + serialization\n\nNow onto the ecosystem.\n\n#EffectTS #TypeScript`,
-	24: `@effect/platform's HttpClient changed how I think about HTTP in TypeScript:\n\n- It's a SERVICE you inject (mockable!)\n- Schema validates responses automatically\n- Errors are typed, not thrown\n- Same code works Node/Bun/browser\n\nNo more raw fetch().\n\n#EffectTS`,
-	27: `Finished my @EffectTS_ journey — here's the production pattern:\n\n1. Services define capabilities\n2. Layers wire dependencies\n3. Config loads settings\n4. Schema validates boundaries\n5. ManagedRuntime runs everything\n\nOne type. Full stack. Type-safe.\n\n#EffectTS #TypeScript`,
+	19: `Fibers in @EffectTS_ = lightweight virtual threads for TypeScript\n\nEffect.fork -> start a fiber\nFiber.join -> wait for result\nFiber.interrupt -> cancel (resources auto-cleanup)\n\nOr just: Effect.all(tasks, { concurrency: 10 })\n\n#EffectTS`,
+	23: `Finished the core @EffectTS_ curriculum!\n\nBiggest takeaways:\n- Effect<A, E, R> — one type to rule them all\n- Generators for logic, pipes for behavior\n- Services + Layers = testable by default\n- Schema for validation + serialization\n\nNow onto the ecosystem.\n\n#EffectTS #TypeScript`,
+	25: `@effect/platform's HttpClient changed how I think about HTTP in TypeScript:\n\n- It's a SERVICE you inject (mockable!)\n- Schema validates responses automatically\n- Errors are typed, not thrown\n- Same code works Node/Bun/browser\n\nNo more raw fetch().\n\n#EffectTS`,
+	28: `Finished my @EffectTS_ journey — here's the production pattern:\n\n1. Services define capabilities\n2. Layers wire dependencies\n3. Config loads settings\n4. Schema validates boundaries\n5. ManagedRuntime runs everything\n\nOne type. Full stack. Type-safe.\n\n#EffectTS #TypeScript`,
 };
 
 export function getPhaseBySlug(slug: string): Phase | undefined {
