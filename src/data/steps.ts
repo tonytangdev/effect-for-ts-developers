@@ -442,41 +442,117 @@ console.log(Effect.runSync(getProfile))
 				title: "pipe & Pipelines",
 				subtitle: "The functional composition backbone",
 				tweet: false,
-				duration: "30 min",
+				duration: "15 min",
 				content:
-					"pipe is the other main way to compose Effects (besides generators). Use it for transformations, adding behaviors, and chaining.",
+					"pipe is the other main way to compose Effects (besides generators). If you've ever chained .then().then().catch() on Promises, pipe is the same idea — but with separate operators for each concern.",
 				keyIdea:
-					"pipe reads top-to-bottom: start with a value, then apply transformations. It's great for adding cross-cutting concerns like timeouts, retries, and logging.",
+					"pipe reads top-to-bottom like method chaining. In TS you write promise.then(f).then(g). In Effect you write pipe(effect, Effect.map(f), Effect.flatMap(g)). Same flow, explicit operators.",
 				concepts: [
 					{
 						name: "pipe(value, fn1, fn2, ...)",
-						desc: "Passes value through fn1, then fn2, etc. Each function receives the previous result.",
+						desc: "Passes value through fn1, then fn2, etc. Like method chaining but as a standalone function — useful because Effect methods aren't on the prototype.",
 					},
 					{
 						name: "Effect.map(f)",
-						desc: "Transforms the success value. Like Promise.then but only for the value.",
+						desc: "Transforms the success value. Like .then(x => x * 2) — f returns a plain value, not an Effect.",
 					},
 					{
 						name: "Effect.flatMap(f)",
-						desc: "Chains Effects. f returns a new Effect. Like .then() returning another Promise.",
-					},
-					{
-						name: "Effect.tap(f)",
-						desc: "Runs a side effect without changing the value. Great for logging.",
+						desc: "Chains Effects. f returns a new Effect. Like .then(x => fetch(...)) where .then receives another Promise.",
 					},
 					{
 						name: "Effect.andThen(f)",
-						desc: "Works as map OR flatMap depending on what f returns. Convenient shorthand.",
+						desc: "Unified map + flatMap. Pass a value, a function, or an Effect — it figures out the right behavior. The most flexible operator.",
+					},
+					{
+						name: "Effect.tap(f)",
+						desc: "Runs a side effect without changing the value. The value passes through unchanged. Great for logging.",
 					},
 				],
 				docsLink:
 					"https://effect.website/docs/getting-started/building-pipelines/",
-				trap: "When to use pipe vs gen? Use gen for complex sequential logic. Use pipe for adding behaviors to an existing Effect (retry, timeout, logging). They compose together.",
-				code: `const program = pipe(
+				trap: "When to use pipe vs gen? Use gen for complex sequential logic (like async/await). Use pipe for adding behaviors to an existing Effect (retry, timeout, logging). They compose together — build your logic with gen, then wrap it in pipe to add cross-cutting concerns.",
+				practice: [
+					{
+						title: "Translate Promise chains to pipe",
+						prompt:
+							"Convert this Promise chain to an Effect pipeline using pipe. Think about which operator replaces each .then().",
+						startCode: `// Promise version
+fetch("/api/user")
+  .then(res => res.json())             // returns a Promise → flatMap
+  .then(user => user.name.toUpperCase()) // returns a value → map
+  .then(name => console.log(name))     // side effect → tap
+
+// TODO: rewrite with pipe
+import { pipe, Effect, Console } from "effect"
+
+const program = pipe(
+  Effect.tryPromise(() => fetch("/api/user")),
+  // your code here
+)`,
+						solution: `import { pipe, Effect, Console } from "effect"
+
+const program = pipe(
+  Effect.tryPromise(() => fetch("/api/user")),
+  // res.json() is async + can fail → flatMap with tryPromise
+  Effect.flatMap((res) =>
+    Effect.tryPromise(() => res.json())
+  ),
+  // .name.toUpperCase() is sync transform → map
+  Effect.map((user) => user.name.toUpperCase()),
+  // console.log is a side effect → tap (value passes through)
+  Effect.tap((name) => Console.log(name))
+)
+// The rule: returns an Effect? → flatMap. Returns a value? → map.
+// Or just use andThen for everything — it auto-detects.`,
+					},
+					{
+						title: "map vs flatMap vs andThen",
+						prompt:
+							"Fix the type errors. Each operator has a specific contract — using the wrong one won't compile.",
+						startCode: `import { pipe, Effect } from "effect"
+
+const getUser = Effect.succeed({ name: "Alice", id: 1 })
+const fetchPosts = (id: number) =>
+  Effect.succeed(["post1", "post2"])
+
+// BUG: map expects a plain value, but fetchPosts returns an Effect
+const posts = pipe(
+  getUser,
+  Effect.map((user) => fetchPosts(user.id))
+)
+// posts is Effect<Effect<string[]>> — double wrapped!
+
+// TODO: fix the operator choice so posts is Effect<string[]>`,
+						solution: `import { pipe, Effect } from "effect"
+
+const getUser = Effect.succeed({ name: "Alice", id: 1 })
+const fetchPosts = (id: number) =>
+  Effect.succeed(["post1", "post2"])
+
+// Fix 1: use flatMap — it "unwraps" the inner Effect
+const posts = pipe(
+  getUser,
+  Effect.flatMap((user) => fetchPosts(user.id))
+)
+// posts is Effect<string[]> ✓
+
+// Fix 2: use andThen — it auto-detects that fetchPosts returns an Effect
+const posts2 = pipe(
+  getUser,
+  Effect.andThen((user) => fetchPosts(user.id))
+)
+// andThen works like map AND flatMap — pick it when you don't want to think about it`,
+					},
+				],
+				code: `// Promise chain → Effect pipeline
+// promise.then(f).then(g)  →  pipe(effect, Effect.map(f), Effect.flatMap(g))
+
+const program = pipe(
   fetchUser(id),
-  Effect.map((user) => user.name),         // transform value
-  Effect.tap((name) => Effect.log(name)),   // side effect
-  Effect.flatMap((name) => saveGreeting(name)), // chain
+  Effect.map((user) => user.name),         // transform value (like .then)
+  Effect.tap((name) => Effect.log(name)),   // side effect (value unchanged)
+  Effect.flatMap((name) => saveGreeting(name)), // chain (like .then returning Promise)
   Effect.timeout("5 seconds"),
   Effect.retry({ times: 3 })
 )`,
@@ -485,32 +561,213 @@ console.log(Effect.runSync(getProfile))
 				id: 6,
 				title: "Control Flow",
 				subtitle: "if/else, loops, matching in Effect",
-				tweet: false,
-				duration: "30 min",
+				tweet: true,
+				duration: "15 min",
 				content:
-					"Standard JS control flow (if/else, for loops) works inside Effect.gen. But Effect also provides functional alternatives for pipelines.",
+					"Effect gives you two styles. Imperative: normal if/else and for-loops inside Effect.gen — you already know this from TS. Declarative: Effect.if, Effect.forEach, Effect.all — describe WHAT should happen, not HOW. Imperative is better when logic is complex with many branches, early returns, or intermediate variables — it reads like regular TS. Declarative wins when you need composability: swapping sequential for concurrent is a one-line option change, and operators chain cleanly in pipes without nesting.",
 				keyIdea:
-					"Inside a generator, use normal if/else and loops — it's the simplest approach. The functional operators (Effect.if, Effect.forEach, etc.) shine in pipe-based code.",
+					"Imperative (generators): best for complex branching, early returns, and readable step-by-step logic. Declarative (operators): best for composable pipelines where you want to add concurrency, retries, or timeouts without restructuring. You don't have to choose one — mix both in the same program.",
 				concepts: [
 					{
 						name: "Effect.if(condition, { onTrue, onFalse })",
-						desc: "Conditional Effect execution in a pipeline.",
+						desc: "Declarative conditional. Same as if/else in a generator, but composable in a pipeline.",
 					},
 					{
 						name: "Effect.forEach(items, fn)",
-						desc: "Maps over items, running an Effect for each. Sequential by default.",
+						desc: "Declarative loop. Like items.map(fn) but each fn returns an Effect. Sequential by default.",
 					},
 					{
 						name: "Effect.all([...effects])",
-						desc: "Runs multiple Effects. Sequential by default, can be made concurrent.",
+						desc: "Run multiple Effects and collect results. Like Promise.all but sequential by default — opt into concurrency explicitly.",
 					},
 					{
 						name: "Effect.match / matchEffect",
-						desc: "Pattern-match on success or failure of an Effect.",
+						desc: "Declarative success/failure handling. match returns a plain value (like a ternary), matchEffect returns a new Effect.",
 					},
 				],
 				docsLink: "https://effect.website/docs/getting-started/control-flow/",
 				trap: 'Effect.all is sequential by default! For parallel execution, pass { concurrency: "unbounded" } or a number. This is the opposite of Promise.all which is always concurrent.',
+				practice: [
+					{
+						title: "Promise.all vs Effect.all",
+						prompt:
+							"You're used to Promise.all running everything concurrently. Effect.all is different. Predict the output order, then fix the code to run concurrently.",
+						startCode: `import { Effect } from "effect"
+
+const task = (label: string, ms: number) =>
+  Effect.gen(function* () {
+    yield* Effect.sleep(\`\${ms} millis\`)
+    yield* Effect.log(label)
+    return label
+  })
+
+// What order do the logs print?
+const program = Effect.all([
+  task("A", 100),
+  task("B", 50),
+  task("C", 10),
+])
+
+// (A) A, B, C  (B) C, B, A  (C) all at once
+
+// TODO: make them run concurrently so fastest finishes first`,
+						solution: `import { Effect } from "effect"
+
+const task = (label: string, ms: number) =>
+  Effect.gen(function* () {
+    yield* Effect.sleep(\`\${ms} millis\`)
+    yield* Effect.log(label)
+    return label
+  })
+
+// Answer: (A) A, B, C — sequential by default!
+// Effect.all runs them one by one, in order.
+
+// Fix: add concurrency option
+const program = Effect.all(
+  [task("A", 100), task("B", 50), task("C", 10)],
+  { concurrency: "unbounded" }
+)
+// Now prints: C, B, A (fastest first)
+// You can also use { concurrency: 2 } to limit parallelism —
+// something Promise.all can't do without extra libraries.`,
+					},
+					{
+						title: "Rewrite a for-loop with Effect.forEach",
+						prompt:
+							"Convert this imperative loop into Effect.forEach. Think about what the callback returns and what the final result looks like.",
+						startCode: `import { Effect } from "effect"
+
+const sendEmail = (to: string) =>
+  Effect.succeed(\`sent to \${to}\`)
+
+// Imperative version inside Effect.gen
+const imperative = Effect.gen(function* () {
+  const users = ["alice@x.com", "bob@x.com", "carol@x.com"]
+  const results: string[] = []
+  for (const user of users) {
+    const result = yield* sendEmail(user)
+    results.push(result)
+  }
+  return results
+})
+
+// TODO: rewrite using Effect.forEach in one line
+const declarative = Effect.forEach(/* ??? */)`,
+						solution: `import { Effect } from "effect"
+
+const sendEmail = (to: string) =>
+  Effect.succeed(\`sent to \${to}\`)
+
+// Effect.forEach maps over items, running an Effect for each,
+// and collects all success values into an array.
+const declarative = Effect.forEach(
+  ["alice@x.com", "bob@x.com", "carol@x.com"],
+  (user) => sendEmail(user)
+)
+// Type: Effect<string[], never, never>
+// Returns: ["sent to alice@x.com", "sent to bob@x.com", "sent to carol@x.com"]
+
+// Like Effect.all, it's sequential by default.
+// Add { concurrency: "unbounded" } to send in parallel:
+const parallel = Effect.forEach(
+  ["alice@x.com", "bob@x.com", "carol@x.com"],
+  (user) => sendEmail(user),
+  { concurrency: "unbounded" }
+)`,
+					},
+					{
+						title: "Effect.if — conditional without if/else",
+						prompt:
+							"Rewrite the generator's if/else as a pipeline using Effect.if. When would you prefer one over the other?",
+						startCode: `import { Effect } from "effect"
+
+const isAdmin = (role: string) => role === "admin"
+
+// Generator style — normal TS if/else
+const checkAccess = (role: string) =>
+  Effect.gen(function* () {
+    if (isAdmin(role)) {
+      return yield* Effect.succeed("full access")
+    } else {
+      return yield* Effect.succeed("read only")
+    }
+  })
+
+// TODO: rewrite as a pipeline using Effect.if
+const checkAccessPipe = (role: string) =>
+  Effect.if(/* ??? */)`,
+						solution: `import { Effect } from "effect"
+
+const isAdmin = (role: string) => role === "admin"
+
+const checkAccessPipe = (role: string) =>
+  Effect.if(isAdmin(role), {
+    onTrue: () => Effect.succeed("full access"),
+    onFalse: () => Effect.succeed("read only"),
+  })
+// Type: Effect<string, never, never>
+
+// When to use which?
+// - In a generator: just use normal if/else — it's simpler
+// - In a pipe chain: Effect.if keeps the pipeline flat
+// Both are valid. Don't force Effect.if where plain if/else reads better.`,
+					},
+					{
+						title: "Effect.match — handle both outcomes",
+						prompt:
+							"Use Effect.match to convert a fallible Effect into a user-friendly message string, handling both success and failure without try/catch.",
+						startCode: `import { Effect } from "effect"
+
+const parseAge = (input: string) =>
+  Effect.try({
+    try: () => {
+      const n = Number(input)
+      if (isNaN(n)) throw new Error("not a number")
+      return n
+    },
+    catch: () => new Error("invalid age"),
+  })
+
+// TODO: use Effect.match to produce a string message for both cases
+// Success → "Your age is 25"
+// Failure → "Error: invalid age"
+const getMessage = (input: string) =>
+  parseAge(input).pipe(
+    Effect.match({
+      // ???
+    })
+  )`,
+						solution: `import { Effect } from "effect"
+
+const parseAge = (input: string) =>
+  Effect.try({
+    try: () => {
+      const n = Number(input)
+      if (isNaN(n)) throw new Error("not a number")
+      return n
+    },
+    catch: () => new Error("invalid age"),
+  })
+
+// Effect.match handles BOTH success and failure,
+// collapsing them into a single non-failing Effect.
+const getMessage = (input: string) =>
+  parseAge(input).pipe(
+    Effect.match({
+      onSuccess: (age) => \`Your age is \${age}\`,
+      onFailure: (err) => \`Error: \${err.message}\`,
+    })
+  )
+// Type: Effect<string, never, never>  — the error channel is gone!
+
+// Effect.runSync(getMessage("25"))   → "Your age is 25"
+// Effect.runSync(getMessage("abc"))  → "Error: invalid age"
+
+// match returns a plain value → the result can't fail.
+// matchEffect returns an Effect → use it when your handler needs to do more Effects.`,
+					},
+				],
 				code: `// Normal JS control flow works in generators
 const program = Effect.gen(function* () {
   const user = yield* getUser(id)
@@ -1465,6 +1722,7 @@ export const TOTAL_STEPS = PHASES.reduce(
 );
 
 export const TWEET_TEMPLATES: Record<number, string> = {
+	6: `@EffectTS_ control flow in 2 lines:\n\nImperative: if (x) yield* doThing()\nDeclarative: Effect.forEach(users, sendEmail, { concurrency: 5 })\n\nOne reads like TS. The other composes.\n\n#EffectTS`,
 	4: `Effect.gen = async/await but with typed errors\n\nconst name = Effect.succeed("Alice")\nconst getUser = (id) => Effect.tryPromise(...)\n\nyield* name        — no (), it's already an Effect\nyield* getUser(id) — (), it returns an Effect\n\n#EffectTS #TypeScript`,
 	7: `The biggest "aha" moment learning @EffectTS_:\n\nThere are TWO kinds of errors:\n\n- Expected (in the type signature) — you MUST handle them\n- Defects (hidden) — bugs that bubble up\n\ntry/catch treats all errors the same. Effect doesn't.\n\n#TypeScript`,
 	10: `Yieldable errors in @EffectTS_ are genius:\n\nclass NotFound extends Data.TaggedError("NotFound")<{ id: string }> {}\n\nyield* new NotFound({ id })\n\nType-safe "throwing" inside generators. No more stringly-typed errors.\n\n#EffectTS`,
