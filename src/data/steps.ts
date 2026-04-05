@@ -21,6 +21,7 @@ export interface Step {
 	concepts: Concept[];
 	docsLink: string;
 	trap: string;
+	tsCode?: string;
 	code?: string;
 	practice?: Practice[];
 }
@@ -449,8 +450,12 @@ console.log(Effect.runSync(getProfile))
 					"pipe reads top-to-bottom like method chaining. In TS you write promise.then(f).then(g). In Effect you write pipe(effect, Effect.map(f), Effect.flatMap(g)). Same flow, explicit operators.",
 				concepts: [
 					{
-						name: "pipe(value, fn1, fn2, ...)",
-						desc: "Passes value through fn1, then fn2, etc. Like method chaining but as a standalone function — useful because Effect methods aren't on the prototype.",
+						name: "pipe(value, fn1, fn2, ...) — standalone",
+						desc: "Imported from 'effect'. Passes value through fn1, then fn2, etc. Works with any value, not just Effects.",
+					},
+					{
+						name: "effect.pipe(fn1, fn2, ...) — method",
+						desc: "Every Effect value has a .pipe() method. Same result, but reads like method chaining. No import needed. Most code uses this style.",
 					},
 					{
 						name: "Effect.map(f)",
@@ -545,14 +550,31 @@ const posts2 = pipe(
 // andThen works like map AND flatMap — pick it when you don't want to think about it`,
 					},
 				],
-				code: `// Promise chain → Effect pipeline
-// promise.then(f).then(g)  →  pipe(effect, Effect.map(f), Effect.flatMap(g))
+				code: `// Two ways to pipe — same result, different syntax:
 
-const program = pipe(
+// --- Style 1: standalone pipe() (import { pipe } from "effect") ---
+import { pipe, Effect } from "effect"
+
+const program1 = pipe(
   fetchUser(id),
-  Effect.map((user) => user.name),         // transform value (like .then)
-  Effect.tap((name) => Effect.log(name)),   // side effect (value unchanged)
-  Effect.flatMap((name) => saveGreeting(name)), // chain (like .then returning Promise)
+  Effect.map((user) => user.name),
+  Effect.flatMap((name) => saveGreeting(name))
+)
+
+// --- Style 2: .pipe() method on the Effect value ---
+const program2 = fetchUser(id).pipe(
+  Effect.map((user) => user.name),
+  Effect.flatMap((name) => saveGreeting(name))
+)
+
+// Both produce the same Effect. Most Effect code uses .pipe()
+// because it reads like method chaining and needs no extra import.
+
+// Full example with cross-cutting concerns:
+const resilient = fetchUser(id).pipe(
+  Effect.map((user) => user.name),
+  Effect.tap((name) => Effect.log(name)),
+  Effect.flatMap((name) => saveGreeting(name)),
   Effect.timeout("5 seconds"),
   Effect.retry({ times: 3 })
 )`,
@@ -793,19 +815,23 @@ const program = Effect.gen(function* () {
 				title: "The Two Error Types",
 				subtitle: "Expected vs Unexpected — the core insight",
 				tweet: true,
-				duration: "45 min",
+				duration: "20 min",
 				content:
-					"This is the concept that makes Effect's error handling superior to try/catch. Effect distinguishes between errors you EXPECT (and handle) vs bugs you DON'T.",
+					"In TypeScript, try/catch treats all errors the same — you never know what a function might throw. Effect splits errors into two categories. The rule is simple: could a user or the outside world cause this error? → Effect.fail (expected). Should it be impossible if the code is correct? → Effect.die (defect). You don't use Effect.die because you expect a bug — you use it as a safety net for things you believe are impossible, so if you're wrong, you crash loudly with a clear message instead of silently continuing with bad state.",
 				keyIdea:
-					"Expected errors appear in the E type parameter — the compiler forces you to handle them. Unexpected errors (defects) are tracked separately and bubble up like uncaught exceptions.",
+					"Expected errors (Effect.fail) go in the E type — the compiler forces callers to handle them. Defects (Effect.die) guard invariants — conditions that should never happen if the code is correct. They're not predictions of bugs, they're safety nets. When one fires, you get a clear message + full fiber trace in Cause, making it easy to debug.",
 				concepts: [
 					{
 						name: "Expected errors (E channel)",
-						desc: "Business logic errors: UserNotFound, InvalidInput, etc. They're in the type signature. You must handle them before running.",
+						desc: "Things that CAN happen in normal operation: user not found, invalid input, network timeout. They're in the type signature. Callers must handle them.",
 					},
 					{
-						name: "Unexpected errors (defects)",
-						desc: "Bugs, crashes, things you can't predict. Effect tracks them in Cause but doesn't put them in the type. Use Effect.die for these.",
+						name: "Defects (unexpected errors)",
+						desc: "Safety nets for things you believe are impossible if the code is correct: an unreachable switch case, a missing config at startup, corrupted internal state. You don't predict these — you guard against them so you crash loudly instead of silently continuing.",
+					},
+					{
+						name: "The decision rule",
+						desc: "Ask: should this be impossible if my code is correct? Yes → Effect.die (guard the invariant). No, it can happen in normal operation → Effect.fail (let the caller handle it).",
 					},
 					{
 						name: "Effect.fail(new MyError())",
@@ -813,32 +839,134 @@ const program = Effect.gen(function* () {
 					},
 					{
 						name: "Effect.die(message)",
-						desc: "Creates a defect. NOT in the type: Effect<never, never, never> — it's hidden.",
+						desc: "Creates a defect. NOT in the type: Effect<never, never, never>. Use when the error means your program has a bug.",
+					},
+					{
+						name: "Effect.dieMessage(text)",
+						desc: "Convenience for Effect.die(new RuntimeException(text)). Use for quick defects with a message.",
+					},
+					{
+						name: "Cause<E>",
+						desc: "The data type that tracks the full error history — failures, defects, interruptions, and even parallel/sequential combinations of errors.",
+					},
+					{
+						name: "Effect.catchAllDefect(effect, handler)",
+						desc: "Catches defects and lets you recover. Use sparingly — defects usually mean a bug you should fix, not catch.",
 					},
 				],
 				docsLink:
 					"https://effect.website/docs/error-management/two-error-types/",
-				trap: "Don't make everything an expected error. Use expected errors for things callers should handle (network failures, validation). Use defects for programming bugs.",
-				code: `// Expected error — caller must handle it
+				trap: "Don't make everything an expected error. Use expected errors for things callers should handle (network failures, validation). Use defects for programming bugs. Also don't routinely catch defects — if you find yourself using catchAllDefect often, you're probably misclassifying errors.",
+				code: `// --- The question: could a user cause this error? ---
+
+// YES → Effect.fail (expected, in the type)
 const findUser = (id: string) =>
   id === "0"
-    ? Effect.fail(new UserNotFound({ id }))  // in the E type
+    ? Effect.fail(new UserNotFound({ id }))
     : Effect.succeed({ id, name: "Alice" })
 // Type: Effect<User, UserNotFound, never>
+// A missing user is normal — the caller should handle it
 
-// Defect — a bug, not in the type
-const divide = (a: number, b: number) =>
-  b === 0
-    ? Effect.die("Division by zero!")  // NOT in the E type
-    : Effect.succeed(a / b)
-// Type: Effect<number, never, never>`,
+// NO → Effect.die (defect, NOT in the type)
+// A switch that should be exhaustive hitting default:
+type Status = "active" | "inactive"
+const label = (s: Status) => {
+  switch (s) {
+    case "active": return Effect.succeed("Active")
+    case "inactive": return Effect.succeed("Inactive")
+    default: return Effect.die(\`Unhandled status: \${s}\`)
+    // If this runs, a developer forgot to add a case.
+    // No user action or retry can fix this.
+  }
+}
+// Type: Effect<string, never, never>
+
+// More defect examples:
+// - Required env var missing at startup → die (deployment is broken)
+// - JSON.parse fails on data YOU generated → die (your code is wrong)
+// - Array access after you just checked length → die (logic bug)
+
+// More expected error examples:
+// - API returns 404 → fail (normal, show "not found" to user)
+// - User submits invalid email → fail (validate and show message)
+// - Network timeout → fail (retry or show error to user)`,
+				practice: [
+					{
+						title: "Classify the errors",
+						prompt:
+							"A function fetches a user from an API. It can fail because the user doesn't exist (404) or because of a JSON parse error. Create the function using Effect.fail for the expected error and Effect.die for the defect.",
+						startCode: `import { Effect } from "effect"
+
+class UserNotFound {
+  readonly _tag = "UserNotFound" as const
+  constructor(readonly id: string) {}
+}
+
+// TODO: implement fetchUser
+// - If id is "missing", fail with UserNotFound
+// - If id is "corrupt", die with "Invalid JSON response"
+// - Otherwise, succeed with { id, name: "Alice" }
+const fetchUser = (id: string) => {
+  // your code here
+}`,
+						solution: `import { Effect } from "effect"
+
+class UserNotFound {
+  readonly _tag = "UserNotFound" as const
+  constructor(readonly id: string) {}
+}
+
+const fetchUser = (id: string) => {
+  if (id === "missing") return Effect.fail(new UserNotFound("missing"))
+  if (id === "corrupt") return Effect.die("Invalid JSON response")
+  return Effect.succeed({ id, name: "Alice" })
+}
+// Type: Effect<{ id: string; name: string }, UserNotFound, never>
+// UserNotFound is visible in the type — callers must handle it
+// The JSON defect is NOT in the type — it's a bug`,
+					},
+					{
+						title: "Spot the mistake",
+						prompt:
+							"This code uses Effect.fail for a missing config value at startup. A missing config means the deployment is broken — no user action can fix it. Refactor it to use the correct error type.",
+						startCode: `import { Effect } from "effect"
+
+class MissingConfig {
+  readonly _tag = "MissingConfig" as const
+  constructor(readonly key: string) {}
+}
+
+// This is wrong — a missing config at startup is not something
+// callers should handle. It means the deployment is broken.
+const getConfig = (key: string) => {
+  const value = process.env[key]
+  return value === undefined
+    ? Effect.fail(new MissingConfig(key))
+    : Effect.succeed(value)
+}
+
+// Fix it: use the right error type`,
+						solution: `import { Effect } from "effect"
+
+// A missing required config means the program can't run.
+// A developer needs to fix the deployment — this is a defect.
+const getConfig = (key: string) => {
+  const value = process.env[key]
+  return value === undefined
+    ? Effect.die(\`Missing required config: \${key}\`)
+    : Effect.succeed(value)
+}
+// Type: Effect<string, never, never>
+// No error in the type — if this fails, fix the deployment.`,
+					},
+				],
 			},
 			{
 				id: 8,
 				title: "Handling Expected Errors",
 				subtitle: "catchTag, catchAll, mapError",
 				tweet: false,
-				duration: "45 min",
+				duration: "20 min",
 				content:
 					"Learn the operators to recover from, transform, or propagate typed errors.",
 				keyIdea:
@@ -850,45 +978,209 @@ const divide = (a: number, b: number) =>
 					},
 					{
 						name: "Effect.catchTag('NotFound', handler)",
-						desc: "Catches only errors with that _tag. Other errors pass through. The E type updates automatically.",
+						desc: "Catches only errors with that _tag. Other errors pass through. The E type updates automatically — the caught error disappears from the union.",
+					},
+					{
+						name: "Effect.catchTags({ A: handler, B: handler })",
+						desc: "Handle multiple tagged errors at once. Each key is a _tag, each value is a handler. Cleaner than chaining multiple catchTag calls.",
 					},
 					{
 						name: "Effect.catchAll(handler)",
-						desc: "Catches all expected errors. You must return a new Effect.",
+						desc: "Catches all expected errors regardless of tag. You receive the error union and must return a new Effect.",
 					},
 					{
 						name: "Effect.mapError(f)",
-						desc: "Transforms the error without handling it. Useful for wrapping low-level errors.",
+						desc: "Transforms the error without handling it — the error stays in E, just with a different type. Useful for wrapping low-level errors into domain errors.",
 					},
 					{
 						name: "Effect.orElse(fallback)",
-						desc: "If the Effect fails, run the fallback Effect instead.",
+						desc: "If the Effect fails, discard the error and run a completely different Effect instead.",
 					},
 				],
 				docsLink:
 					"https://effect.website/docs/error-management/expected-errors/",
 				trap: "catchTag only works with tagged unions. If your errors don't have _tag, use catchAll or match instead.",
-				code: `class NotFound extends Data.TaggedError("NotFound")<{ id: string }> {}
-class Forbidden extends Data.TaggedError("Forbidden")<{}> {}
+				code: `// --- Setup: tagged error classes + a function that can fail ---
+class NotFound { readonly _tag = "NotFound" as const; constructor(readonly id: string) {} }
+class Forbidden { readonly _tag = "Forbidden" as const }
 
-const program = pipe(
-  getResource(id),
-  // Handle only NotFound, Forbidden passes through
+const getResource = (id: string) => {
+  if (id === "missing") return Effect.fail(new NotFound(id))
+  if (id === "secret") return Effect.fail(new Forbidden())
+  return Effect.succeed({ id, name: "Resource" })
+}
+// Type: Effect<Resource, NotFound | Forbidden, never>
+
+// --- catchTag: handle ONE specific error ---
+const withFallback = getResource("missing").pipe(
   Effect.catchTag("NotFound", ({ id }) =>
-    Effect.succeed(fallbackResource(id))
-  ),
-  // Transform remaining errors
-  Effect.mapError((e) => new AppError({ cause: e }))
-)`,
+    Effect.succeed({ id, name: "Default" })
+  )
+)
+// Type: Effect<Resource, Forbidden, never>
+// NotFound is gone from the type! Forbidden still needs handling.
+
+// --- catchTags: handle MULTIPLE errors at once ---
+const withAllHandled = getResource("missing").pipe(
+  Effect.catchTags({
+    NotFound: ({ id }) => Effect.succeed({ id, name: "Default" }),
+    Forbidden: () => Effect.succeed({ id: "0", name: "Guest" }),
+  })
+)
+// Type: Effect<Resource, never, never>
+// All errors handled — no E left.
+
+// --- catchAll: handle ALL expected errors (any tag) ---
+const withCatchAll = getResource("missing").pipe(
+  Effect.catchAll((error) =>
+    Effect.succeed({ id: "0", name: \`Fallback (\${error._tag})\` })
+  )
+)
+// Type: Effect<Resource, never, never>
+
+// --- mapError: transform without handling ---
+class AppError { readonly _tag = "AppError" as const; constructor(readonly cause: unknown) {} }
+
+const withWrapped = getResource("missing").pipe(
+  Effect.mapError((e) => new AppError(e))
+)
+// Type: Effect<Resource, AppError, never>
+// Error is still there, just wrapped. Caller still must handle it.
+
+// --- orElse: swap to a completely different Effect ---
+const withOrElse = getResource("missing").pipe(
+  Effect.orElse(() => Effect.succeed({ id: "0", name: "Fallback" }))
+)
+// Type: Effect<Resource, never, never>`,
+				practice: [
+					{
+						title: "Use catchTag to handle one error",
+						prompt:
+							"The program below can fail with NotFound or RateLimited. Use catchTag to handle ONLY NotFound by returning a default post. Let RateLimited pass through.",
+						startCode: `import { Effect } from "effect"
+
+class NotFound { readonly _tag = "NotFound" as const; constructor(readonly id: string) {} }
+class RateLimited { readonly _tag = "RateLimited" as const }
+
+const getPost = (id: string) => {
+  if (id === "missing") return Effect.fail(new NotFound(id))
+  if (id === "busy") return Effect.fail(new RateLimited())
+  return Effect.succeed({ id, title: "Hello World" })
+}
+
+// TODO: handle only NotFound, return { id, title: "Default Post" }
+// RateLimited should still be in the error type
+const program = getPost("missing")`,
+						solution: `import { Effect } from "effect"
+
+class NotFound { readonly _tag = "NotFound" as const; constructor(readonly id: string) {} }
+class RateLimited { readonly _tag = "RateLimited" as const }
+
+const getPost = (id: string) => {
+  if (id === "missing") return Effect.fail(new NotFound(id))
+  if (id === "busy") return Effect.fail(new RateLimited())
+  return Effect.succeed({ id, title: "Hello World" })
+}
+
+const program = getPost("missing").pipe(
+  Effect.catchTag("NotFound", ({ id }) =>
+    Effect.succeed({ id, title: "Default Post" })
+  )
+)
+// Type: Effect<{ id: string; title: string }, RateLimited, never>`,
+					},
+					{
+						title: "Wrap errors with mapError",
+						prompt:
+							"Use mapError to wrap both NotFound and RateLimited into a single AppError type. Don't handle the errors — just transform them.",
+						startCode: `import { Effect } from "effect"
+
+class NotFound { readonly _tag = "NotFound" as const; constructor(readonly id: string) {} }
+class RateLimited { readonly _tag = "RateLimited" as const }
+class AppError { readonly _tag = "AppError" as const; constructor(readonly message: string) {} }
+
+const getPost = (id: string) => {
+  if (id === "missing") return Effect.fail(new NotFound(id))
+  if (id === "busy") return Effect.fail(new RateLimited())
+  return Effect.succeed({ id, title: "Hello World" })
+}
+
+// TODO: use mapError to wrap all errors into AppError
+// Hint: use the _tag to build a descriptive message
+const program = getPost("missing")`,
+						solution: `import { Effect } from "effect"
+
+class NotFound { readonly _tag = "NotFound" as const; constructor(readonly id: string) {} }
+class RateLimited { readonly _tag = "RateLimited" as const }
+class AppError { readonly _tag = "AppError" as const; constructor(readonly message: string) {} }
+
+const getPost = (id: string) => {
+  if (id === "missing") return Effect.fail(new NotFound(id))
+  if (id === "busy") return Effect.fail(new RateLimited())
+  return Effect.succeed({ id, title: "Hello World" })
+}
+
+const program = getPost("missing").pipe(
+  Effect.mapError((e) => new AppError(
+    e._tag === "NotFound"
+      ? \`Post \${e.id} not found\`
+      : "Too many requests"
+  ))
+)
+// Type: Effect<{ id: string; title: string }, AppError, never>
+// Error is still there — just unified into one type.`,
+					},
+					{
+						title: "Handle all errors with catchTags",
+						prompt:
+							"Use catchTags to handle both NotFound and RateLimited in a single call. Return a fallback post for NotFound and retry message for RateLimited.",
+						startCode: `import { Effect } from "effect"
+
+class NotFound { readonly _tag = "NotFound" as const; constructor(readonly id: string) {} }
+class RateLimited { readonly _tag = "RateLimited" as const }
+
+const getPost = (id: string) => {
+  if (id === "missing") return Effect.fail(new NotFound(id))
+  if (id === "busy") return Effect.fail(new RateLimited())
+  return Effect.succeed({ id, title: "Hello World" })
+}
+
+// TODO: use catchTags to handle both errors
+// NotFound → succeed with { id, title: "Default Post" }
+// RateLimited → succeed with { id: "0", title: "Try again later" }
+const program = getPost("missing")`,
+						solution: `import { Effect } from "effect"
+
+class NotFound { readonly _tag = "NotFound" as const; constructor(readonly id: string) {} }
+class RateLimited { readonly _tag = "RateLimited" as const }
+
+const getPost = (id: string) => {
+  if (id === "missing") return Effect.fail(new NotFound(id))
+  if (id === "busy") return Effect.fail(new RateLimited())
+  return Effect.succeed({ id, title: "Hello World" })
+}
+
+const program = getPost("missing").pipe(
+  Effect.catchTags({
+    NotFound: ({ id }) =>
+      Effect.succeed({ id, title: "Default Post" }),
+    RateLimited: () =>
+      Effect.succeed({ id: "0", title: "Try again later" }),
+  })
+)
+// Type: Effect<{ id: string; title: string }, never, never>
+// Both errors handled — E is never.`,
+					},
+				],
 			},
 			{
 				id: 9,
 				title: "Retrying & Timeouts",
 				subtitle: "Schedule-based resilience",
 				tweet: false,
-				duration: "30 min",
+				duration: "15 min",
 				content:
-					"Effect has built-in retry and timeout that compose cleanly with your error types.",
+					"In TypeScript, retrying means a while loop with try/catch, manual delay, and a counter. Timeouts mean wrapping everything in Promise.race with a setTimeout. It's messy, error-prone, and doesn't compose. Effect gives you declarative retry and timeout that snap onto any Effect with .pipe().",
 				keyIdea:
 					'Retries use Schedule — a composable description of "when to retry". Timeouts add a new error type to your Effect\'s E channel automatically.',
 				concepts: [
@@ -911,25 +1203,134 @@ const program = pipe(
 				],
 				docsLink: "https://effect.website/docs/error-management/retrying/",
 				trap: "timeout adds TimeoutException to your error channel. If you want to handle it specifically, use catchTag('TimeoutException', ...).",
-				code: `const resilient = pipe(
-  fetchData,
-  Effect.timeout("5 seconds"),
+				tsCode: `async function fetchWithRetry(url: string) {
+  for (let i = 0; i < 3; i++) {
+    try {
+      const controller = new AbortController()
+      const id = setTimeout(() => controller.abort(), 5000)
+      const res = await fetch(url, { signal: controller.signal })
+      clearTimeout(id)
+      return await res.json()
+    } catch (e) {
+      if (i === 2) throw e
+      await new Promise((r) => setTimeout(r, 1000 * 2 ** i))
+    }
+  }
+}
+// 15 lines. Manual loop, manual backoff, manual abort.
+// Want to change the strategy? Rewrite the whole function.`,
+				code: `// --- Effect.retry: retry on failure ---
+// Simplest: retry up to 3 times
+const retried = fetchData.pipe(
+  Effect.retry({ times: 3 })
+)
+
+// With a Schedule: exponential backoff, max 3 attempts
+const withBackoff = fetchData.pipe(
   Effect.retry(
     Schedule.exponential("1 second").pipe(
       Schedule.compose(Schedule.recurs(3))
     )
-  ),
+  )
+)
+// Waits 1s, 2s, 4s between retries
+
+// Fixed delay between retries
+const withFixed = fetchData.pipe(
+  Effect.retry(Schedule.fixed("500 millis"))
+)
+
+// --- Effect.timeout: fail if too slow ---
+const withTimeout = fetchData.pipe(
+  Effect.timeout("5 seconds")
+)
+// Type adds TimeoutException to the E channel automatically
+
+// --- Effect.timeoutFail: custom error on timeout ---
+class MyTimeout { readonly _tag = "MyTimeout" as const }
+
+const withCustomTimeout = fetchData.pipe(
+  Effect.timeoutFail({
+    duration: "5 seconds",
+    onTimeout: () => new MyTimeout()
+  })
+)
+// Type: Effect<Data, OriginalError | MyTimeout, never>
+
+// --- Composing them together ---
+const resilient = fetchData.pipe(
+  Effect.timeout("5 seconds"),
+  Effect.retry({ times: 3 }),
   Effect.catchTag("TimeoutException", () =>
     Effect.succeed(cachedData)
   )
+)
+// timeout each attempt, retry up to 3 times, fallback on timeout`,
+				practice: [
+					{
+						title: "Add retry with backoff",
+						prompt:
+							"The API call below is flaky. Add a retry policy with exponential backoff starting at 500ms, max 3 attempts.",
+						startCode: `import { Effect, Schedule } from "effect"
+
+const callApi = Effect.tryPromise(() =>
+  fetch("https://api.example.com/data").then((r) => r.json())
+)
+
+// TODO: add retry with exponential backoff
+// - Start at 500ms
+// - Max 3 attempts
+const program = callApi`,
+						solution: `import { Effect, Schedule } from "effect"
+
+const callApi = Effect.tryPromise(() =>
+  fetch("https://api.example.com/data").then((r) => r.json())
+)
+
+const program = callApi.pipe(
+  Effect.retry(
+    Schedule.exponential("500 millis").pipe(
+      Schedule.compose(Schedule.recurs(3))
+    )
+  )
 )`,
+					},
+					{
+						title: "Timeout with fallback",
+						prompt:
+							"Add a 3-second timeout to the slow effect. If it times out, return the cached value instead of failing.",
+						startCode: `import { Effect } from "effect"
+
+const slowQuery = Effect.tryPromise(() =>
+  fetch("https://api.example.com/slow")
+)
+const cachedResult = { data: "cached" }
+
+// TODO: add a 3-second timeout
+// If it times out, return cachedResult
+const program = slowQuery`,
+						solution: `import { Effect } from "effect"
+
+const slowQuery = Effect.tryPromise(() =>
+  fetch("https://api.example.com/slow")
+)
+const cachedResult = { data: "cached" }
+
+const program = slowQuery.pipe(
+  Effect.timeout("3 seconds"),
+  Effect.catchTag("TimeoutException", () =>
+    Effect.succeed(cachedResult)
+  )
+)`,
+					},
+				],
 			},
 			{
 				id: 10,
 				title: "Yieldable Errors",
 				subtitle: "Errors as first-class values",
 				tweet: true,
-				duration: "20 min",
+				duration: "15 min",
 				content:
 					'A powerful Effect pattern: make your errors yieldable so you can use yield* to "throw" them in generators.',
 				keyIdea:

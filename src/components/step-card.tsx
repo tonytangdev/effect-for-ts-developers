@@ -89,11 +89,21 @@ export function StepCard({ step, phase }: StepCardProps) {
           ))}
         </div>
 
+        {/* TypeScript equivalent */}
+        {step.tsCode && (
+          <div className="mb-4">
+            <span className="text-[9px] uppercase tracking-[2px] text-text-muted block mb-2 font-semibold">
+              In TypeScript
+            </span>
+            <CodeBlock code={step.tsCode} />
+          </div>
+        )}
+
         {/* Code example */}
         {step.code && (
           <div className="mb-4">
             <span className="text-[9px] uppercase tracking-[2px] text-text-muted block mb-2 font-semibold">
-              Example
+              {step.tsCode ? "With Effect" : "Example"}
             </span>
             <CodeBlock code={step.code} />
           </div>
