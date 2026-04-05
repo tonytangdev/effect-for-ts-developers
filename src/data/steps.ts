@@ -1980,38 +1980,257 @@ Effect.runPromise(Effect.provide(program, AppLive))`,
 				tweet: false,
 				duration: "45 min",
 				content:
-					"Scope ensures resources (DB connections, file handles, sockets) are always cleaned up — even on errors or interruption.",
+					"In TypeScript you use try/finally to clean up resources — but it's easy to forget, doesn't compose, and gets messy with multiple resources. Scope ensures resources (DB connections, file handles, sockets) are always cleaned up — even on errors or interruption. Acquire runs uninterruptibly (can't be cancelled halfway), and release is guaranteed. Multiple resources are released in reverse order (LIFO), just like nested try/finally blocks.",
 				keyIdea:
-					"Effect.acquireRelease pairs an acquire Effect with a release Effect. The release is GUARANTEED to run. Scope manages the lifecycle automatically.",
+					"Effect.acquireRelease pairs an acquire Effect with a release Effect. The release is GUARANTEED to run — on success, failure, or interruption. Scope manages the lifecycle automatically.",
 				concepts: [
 					{
-						name: "Effect.acquireRelease({ acquire, release })",
-						desc: "Creates a scoped resource. Release runs on success, failure, or interruption.",
+						name: "Effect.acquireRelease(acquire, release)",
+						desc: "Creates a scoped resource. Acquire runs uninterruptibly. Release receives the resource and an Exit value so you can react to how the scope ended.",
+					},
+					{
+						name: "Effect.acquireUseRelease(acquire, use, release)",
+						desc: "One-shot variant: acquire → use → release in one call. No Scope needed — good when you don't need to compose resources.",
 					},
 					{
 						name: "Effect.scoped",
-						desc: "Runs a scoped Effect, closing all resources when done.",
+						desc: "Runs a scoped Effect, closing all acquired resources when done. Removes Scope from R.",
 					},
 					{
 						name: "Scope (R parameter)",
-						desc: "When R includes Scope, the Effect manages resources. Use Effect.scoped to remove it.",
+						desc: "When R includes Scope, the Effect manages resources. Use Effect.scoped to remove it before running.",
 					},
 					{
-						name: "Effect.addFinalizer(f)",
-						desc: "Registers cleanup logic that runs when the scope closes.",
+						name: "Effect.addFinalizer(exit => ...)",
+						desc: "Registers cleanup logic that runs when the scope closes. Receives Exit so you can log differently on failure vs success.",
+					},
+					{
+						name: "Layer.scoped",
+						desc: "Creates a Layer from a scoped Effect — the resource lives as long as the Layer's scope (typically the app lifetime).",
 					},
 				],
 				docsLink: "https://effect.website/docs/resource-management/scope/",
-				trap: "Don't forget Effect.scoped! Without it, Scope stays in R and you can't run the Effect. Think of it as the \"using\" block in C#.",
-				code: `const dbConnection = Effect.acquireRelease(
-  Effect.tryPromise(() => pool.connect()),  // acquire
-  (conn) => Effect.sync(() => conn.release()) // always runs
+				trap: "Don't forget Effect.scoped! Without it, Scope stays in R and you can't run the Effect. Think of it like try/finally — acquireRelease defines what to clean up, Effect.scoped is the block that triggers the cleanup.",
+				tsCode: `// TypeScript: manual try/finally — fragile with multiple resources
+async function fetchData() {
+  const conn = await pool.connect()
+  try {
+    const file = await fs.open("/tmp/output", "w")
+    try {
+      const data = await conn.query("SELECT * FROM users")
+      await file.write(JSON.stringify(data))
+      return data
+    } finally {
+      await file.close() // must remember this
+    }
+  } finally {
+    conn.release() // must remember this too
+  }
+  // Problems:
+  // - Nested try/finally for each resource
+  // - Easy to forget cleanup
+  // - If file.close() throws, conn.release() still runs? (yes, but messy)
+  // - Doesn't handle interruption/cancellation
+}`,
+				code: `// ── acquireRelease: define resource lifecycle ──
+const dbConnection = Effect.acquireRelease(
+  Effect.tryPromise(() => pool.connect()),       // acquire (uninterruptible)
+  (conn, exit) => Effect.sync(() => {             // release (guaranteed)
+    if (Exit.isFailure(exit)) console.log("cleaning up after failure")
+    conn.release()
+  })
 )
+// Type: Effect<Connection, Error, Scope>
+//                                  ^^^^^ needs a scope to manage it
 
 const program = Effect.gen(function* () {
   const conn = yield* dbConnection
   return yield* conn.query("SELECT * FROM users")
-}).pipe(Effect.scoped) // closes scope, releases connection`,
+}).pipe(Effect.scoped) // ← closes scope → releases connection
+// Type: Effect<QueryResult, Error, never>
+//                                  ^^^^^ Scope removed, ready to run
+
+// ── acquireUseRelease: one-shot, no Scope needed ──
+const oneShot = Effect.acquireUseRelease(
+  Effect.tryPromise(() => pool.connect()),         // acquire
+  (conn) => conn.query("SELECT 1"),                // use
+  (conn) => Effect.sync(() => conn.release())      // release
+)
+// Type: Effect<QueryResult, Error, never> — no Scope in R
+
+// ── addFinalizer: register cleanup in a generator ──
+const withCleanup = Effect.gen(function* () {
+  yield* Effect.addFinalizer((exit) =>
+    Effect.sync(() => console.log(\`ended with: \${exit._tag}\`))
+  )
+  return 42
+}).pipe(Effect.scoped)
+
+// ── Layer.scoped: resource lives as long as the app ──
+const DbLive = Layer.scoped(
+  Database,
+  Effect.acquireRelease(
+    Effect.tryPromise(() => pool.connect()),
+    (conn) => Effect.sync(() => conn.release())
+  ).pipe(Effect.map((conn) => ({ query: (sql) => conn.query(sql) })))
+)`,
+				diagram: `  TypeScript try/finally          Effect Scope
+  ─────────────────────          ────────────────────
+
+  try {                          Effect.acquireRelease(
+    resource = acquire()           acquire,  ← uninterruptible
+                                   release   ← guaranteed
+                                 )
+
+    use(resource)                yield* resource   // use it
+
+  } finally {                    Effect.scoped     // closes scope
+    resource.close()               → release runs automatically
+  }                                → even on error or interruption
+
+
+  Multiple resources — LIFO release order:
+  ─────────────────────────────────────────
+
+  const program = Effect.gen(function* () {
+    const a = yield* resourceA    // acquired 1st
+    const b = yield* resourceB    // acquired 2nd
+    const c = yield* resourceC    // acquired 3rd
+    // use them...
+  }).pipe(Effect.scoped)
+
+  // On scope close:
+  // release(c) → release(b) → release(a)
+  // Just like nested try/finally — last in, first out`,
+				practice: [
+					{
+						title: "Convert try/finally to acquireRelease",
+						prompt:
+							"Convert this TypeScript function to use Effect.acquireRelease + Effect.scoped. The resource is a file handle.",
+						startCode: `import { Effect } from "effect"
+
+// Original TypeScript:
+// async function readFile(path: string) {
+//   const handle = await fs.open(path, "r")
+//   try {
+//     return await handle.readFile("utf-8")
+//   } finally {
+//     await handle.close()
+//   }
+// }
+
+// TODO: Rewrite using Effect.acquireRelease
+// 1. Define fileHandle as a scoped resource
+// 2. Use it in Effect.gen
+// 3. Apply Effect.scoped`,
+						solution: `import { Effect } from "effect"
+
+const fileHandle = (path: string) => Effect.acquireRelease(
+  Effect.tryPromise(() => fs.open(path, "r")),     // acquire
+  (handle) => Effect.promise(() => handle.close())  // release
+)
+
+const readFile = (path: string) => Effect.gen(function* () {
+  const handle = yield* fileHandle(path)
+  return yield* Effect.tryPromise(() => handle.readFile("utf-8"))
+}).pipe(Effect.scoped)
+// Type: Effect<string, Error, never> — no Scope, ready to run`,
+					},
+					{
+						title: "Use acquireUseRelease for a one-shot operation",
+						prompt:
+							"Use Effect.acquireUseRelease to acquire a DB connection, run a query, and release it. No Scope needed.",
+						startCode: `import { Effect } from "effect"
+
+// Helpers (pretend these exist):
+// pool.connect(): Promise<Connection>
+// conn.query(sql: string): Effect<Row[]>
+// conn.release(): void
+
+// TODO: Use Effect.acquireUseRelease to:
+// 1. Acquire a connection from the pool
+// 2. Query "SELECT * FROM orders"
+// 3. Release the connection`,
+						solution: `import { Effect } from "effect"
+
+const getOrders = Effect.acquireUseRelease(
+  Effect.tryPromise(() => pool.connect()),          // acquire
+  (conn) => conn.query("SELECT * FROM orders"),     // use
+  (conn) => Effect.sync(() => conn.release())       // release (guaranteed)
+)
+// Type: Effect<Row[], Error, never>
+// No Scope in R — acquireUseRelease manages it internally`,
+					},
+					{
+						title: "Compose multiple scoped resources",
+						prompt:
+							"Create two scoped resources (a DB connection and a file handle) and use them together in a single Effect.gen. Apply Effect.scoped once at the end. Predict the release order.",
+						startCode: `import { Effect } from "effect"
+
+// TODO:
+// 1. Define dbConn as a scoped resource (acquireRelease)
+// 2. Define fileHandle as a scoped resource (acquireRelease)
+// 3. Use both in Effect.gen — query DB, write result to file
+// 4. Apply Effect.scoped
+// 5. Add a comment: which resource is released first?`,
+						solution: `import { Effect } from "effect"
+
+const dbConn = Effect.acquireRelease(
+  Effect.tryPromise(() => pool.connect()),
+  (conn) => Effect.sync(() => {
+    console.log("releasing DB connection")
+    conn.release()
+  })
+)
+
+const fileHandle = Effect.acquireRelease(
+  Effect.tryPromise(() => fs.open("/tmp/output", "w")),
+  (handle) => Effect.promise(() => {
+    console.log("closing file")
+    return handle.close()
+  })
+)
+
+const program = Effect.gen(function* () {
+  const conn = yield* dbConn       // acquired 1st
+  const file = yield* fileHandle   // acquired 2nd
+  const data = yield* conn.query("SELECT * FROM users")
+  yield* Effect.tryPromise(() => file.write(JSON.stringify(data)))
+  return data
+}).pipe(Effect.scoped)
+
+// Release order: file closed FIRST, then DB connection released
+// LIFO — last acquired, first released (like nested try/finally)`,
+					},
+					{
+						title: "Use addFinalizer with Exit",
+						prompt:
+							"Use Effect.addFinalizer inside an Effect.gen to log whether the scope ended in success or failure. Use Exit.isSuccess to check.",
+						startCode: `import { Effect, Exit } from "effect"
+
+// TODO: Create an Effect.gen that:
+// 1. Registers a finalizer with addFinalizer
+// 2. The finalizer should log "success" or "failure" based on Exit
+// 3. Returns "hello"
+// 4. Wrap with Effect.scoped`,
+						solution: `import { Effect, Exit } from "effect"
+
+const program = Effect.gen(function* () {
+  yield* Effect.addFinalizer((exit) =>
+    Effect.sync(() => {
+      if (Exit.isSuccess(exit)) {
+        console.log("scope ended successfully")
+      } else {
+        console.log("scope ended with failure")
+      }
+    })
+  )
+  return "hello"
+}).pipe(Effect.scoped)
+
+// Effect.runPromise(program) logs "scope ended successfully"`,
+					},
+				],
 			},
 		],
 	},
