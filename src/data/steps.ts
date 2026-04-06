@@ -4546,20 +4546,185 @@ const result = Stream.runCollect(recovered)
 					"Because services are in the R type, you can provide mock implementations in tests. TestClock.adjust lets you fast-forward time without waiting.",
 				concepts: [
 					{
+						name: "TestContext.TestContext",
+						desc: "A Layer providing test implementations of Clock, Random, etc. Provide it to enable TestClock and friends.",
+					},
+					{
 						name: "Test layers",
-						desc: "Create Layer with mock implementations for testing. Your Effect code doesn't change.",
+						desc: "Create Layer with mock implementations for testing. Your Effect code doesn't change — just swap what you provide.",
 					},
 					{
 						name: "TestClock.adjust('5 minutes')",
-						desc: "Advances the virtual clock. Scheduled effects fire instantly.",
+						desc: "Advances the virtual clock. Scheduled effects fire instantly. Fork first, adjust, then join.",
 					},
 					{
 						name: "Effect.provide(testLayer)",
-						desc: "Swap production dependencies with test doubles.",
+						desc: "Swap production dependencies with test doubles. Same code, different wiring.",
+					},
+					{
+						name: "Fork → adjust → join pattern",
+						desc: "For time-based tests: fork the effect, adjust TestClock, then Fiber.join to get the result.",
 					},
 				],
+				tsCode: `// TypeScript: manual mocking with jest/vitest
+import { describe, it, expect, vi } from "vitest"
+
+// You mock modules, not interfaces — fragile and implicit
+vi.mock("./email-service", () => ({
+  sendEmail: vi.fn().mockResolvedValue(true)
+}))
+// If the module path changes, the mock silently breaks.
+// No type safety — mock can return wrong shape.
+
+describe("notifications", () => {
+  it("sends email", async () => {
+    const { sendEmail } = await import("./email-service")
+    await sendEmail("user@test.com", "Hello!")
+    expect(sendEmail).toHaveBeenCalledWith("user@test.com", "Hello!")
+  })
+
+  // Time testing: fake timers are global and brittle
+  it("schedules work", () => {
+    vi.useFakeTimers()
+    setTimeout(() => { /* ... */ }, 60_000)
+    vi.advanceTimersByTime(60_000)
+    vi.useRealTimers() // Don't forget to restore!
+  })
+})`,
+				code: `import { Effect, Layer, TestClock, Fiber, TestContext } from "effect"
+import { describe, it, expect } from "vitest"
+
+// 1. Define a service interface
+class EmailService extends Effect.Tag("EmailService")<
+  EmailService,
+  { readonly send: (to: string, body: string) => Effect.Effect<void> }
+>() {}
+
+// 2. Test layer — no emails actually sent
+const TestEmailService = Layer.succeed(EmailService, {
+  send: (_to, _body) => Effect.void
+})
+
+describe("notifications", () => {
+  // 3. Test with mock deps — just provide the test layer
+  it("sends email", async () => {
+    const program = Effect.gen(function* () {
+      const email = yield* EmailService
+      yield* email.send("user@test.com", "Hello!")
+      return "sent"
+    }).pipe(Effect.provide(TestEmailService))
+
+    const result = await Effect.runPromise(program)
+    expect(result).toBe("sent")
+  })
+
+  // 4. TestClock: fork → adjust → join
+  it("handles scheduled work", async () => {
+    const program = Effect.gen(function* () {
+      const fiber = yield* Effect.sleep("5 minutes").pipe(
+        Effect.as("done"),
+        Effect.fork
+      )
+      yield* TestClock.adjust("5 minutes")
+      return yield* Fiber.join(fiber)
+    }).pipe(Effect.provide(TestContext.TestContext))
+
+    const result = await Effect.runPromise(program)
+    expect(result).toBe("done")
+  })
+})`,
 				docsLink: "https://effect.website/docs/testing/testclock/",
 				trap: "Remember: services are interfaces. If you design services as interfaces from the start, testing is trivial. If you hardcode implementations, you lose this power.",
+				practice: [
+					{
+						title: "Mock a database service",
+						prompt:
+							"Create a test layer for UserRepo that returns a hardcoded user instead of hitting a real DB. Then test a function that uses it.",
+						startCode: `import { Effect, Layer } from "effect"
+
+class UserRepo extends Effect.Tag("UserRepo")<
+  UserRepo,
+  { readonly findById: (id: string) => Effect.Effect<{ name: string }> }
+>() {}
+
+// TODO: Create a TestUserRepo layer that returns { name: "Test User" }
+const TestUserRepo = ???
+
+// This is the function under test
+const getGreeting = (id: string) => Effect.gen(function* () {
+  const repo = yield* UserRepo
+  const user = yield* repo.findById(id)
+  return \`Hello, \${user.name}!\`
+})
+
+// TODO: Run getGreeting with the test layer and verify the result`,
+						solution: `import { Effect, Layer } from "effect"
+
+class UserRepo extends Effect.Tag("UserRepo")<
+  UserRepo,
+  { readonly findById: (id: string) => Effect.Effect<{ name: string }> }
+>() {}
+
+// Test layer — hardcoded response, no DB needed
+const TestUserRepo = Layer.succeed(UserRepo, {
+  findById: (_id) => Effect.succeed({ name: "Test User" })
+})
+
+const getGreeting = (id: string) => Effect.gen(function* () {
+  const repo = yield* UserRepo
+  const user = yield* repo.findById(id)
+  return \`Hello, \${user.name}!\`
+})
+
+// Run with test layer
+const test = getGreeting("123").pipe(
+  Effect.provide(TestUserRepo)
+)
+// Effect.runPromise(test) → "Hello, Test User!"`,
+					},
+					{
+						title: "Test a scheduled effect with TestClock",
+						prompt:
+							"Test that an effect which sleeps for 10 seconds returns 'timeout' using TestClock. Remember the fork → adjust → join pattern.",
+						startCode: `import { Effect, TestClock, Fiber, Option, TestContext } from "effect"
+
+const delayedEffect = Effect.sleep("10 seconds").pipe(
+  Effect.timeoutTo({
+    duration: "5 seconds",
+    onSuccess: () => "completed" as const,
+    onTimeout: () => "timeout" as const,
+  })
+)
+
+// TODO: Write a test that proves this returns "timeout"
+// Hint: fork the effect, adjust clock by 5 seconds, join the fiber
+const test = Effect.gen(function* () {
+  // your code here
+})`,
+						solution: `import { Effect, TestClock, Fiber, Option, TestContext } from "effect"
+
+const delayedEffect = Effect.sleep("10 seconds").pipe(
+  Effect.timeoutTo({
+    duration: "5 seconds",
+    onSuccess: () => "completed" as const,
+    onTimeout: () => "timeout" as const,
+  })
+)
+
+const test = Effect.gen(function* () {
+  // 1. Fork — starts the effect on a separate fiber
+  const fiber = yield* Effect.fork(delayedEffect)
+  // 2. Adjust — fast-forward virtual clock by 5 seconds
+  yield* TestClock.adjust("5 seconds")
+  // 3. Join — get the result
+  const result = yield* Fiber.join(fiber)
+  // result === "timeout" because 5s < 10s sleep
+  console.log(result) // "timeout"
+}).pipe(Effect.provide(TestContext.TestContext))
+
+// Effect.runPromise(test)`,
+					},
+				],
 			},
 			{
 				id: 25,
@@ -4574,23 +4739,202 @@ const result = Stream.runCollect(recovered)
 				concepts: [
 					{
 						name: "Dual APIs",
-						desc: "Effect.map(effect, f) or effect.pipe(Effect.map(f)) — both work. Choose what reads better.",
+						desc: "Effect.map(effect, f) or effect.pipe(Effect.map(f)) — both work. Data-first for quick one-offs, data-last for pipe chains.",
+					},
+					{
+						name: "pipe() function",
+						desc: "Like Unix pipes for code. pipe(value, f, g, h) = h(g(f(value))). Reads top-to-bottom instead of inside-out.",
 					},
 					{
 						name: "Brand.nominal<'UserId'>()",
-						desc: "Creates a nominal type. Prevents accidental string-for-string substitution.",
+						desc: "Nominal type without runtime checks. Prevents passing a UserId where ProductId is expected — even though both are strings.",
 					},
 					{
-						name: "Match.value(x).pipe(...)",
-						desc: "Exhaustive pattern matching with type narrowing.",
+						name: "Brand.refined<'Age'>()",
+						desc: "Branded type WITH runtime validation. e.g., ensure Age is between 0-150. Fails at construction time, not deep in business logic.",
 					},
 					{
-						name: "Data.TaggedEnum",
-						desc: "Create discriminated unions with built-in pattern matching support.",
+						name: "Data.TaggedEnum + $is / $match",
+						desc: "Discriminated unions with built-in type guards ($is) and exhaustive pattern matching ($match). Like Rust enums for TS.",
 					},
 				],
+				tsCode: `// TypeScript: discriminated unions are manual work
+type Shape =
+  | { kind: "circle"; radius: number }
+  | { kind: "rect"; width: number; height: number }
+
+// You write the switch yourself — no exhaustiveness help
+function area(s: Shape): number {
+  switch (s.kind) {
+    case "circle": return Math.PI * s.radius ** 2
+    case "rect": return s.width * s.height
+    // Forgot a case? TS won't warn you by default.
+  }
+}
+
+// Branded types? You fake them with intersections:
+type UserId = string & { readonly __brand: "UserId" }
+// No constructor, no validation — just casting everywhere`,
+				code: `import { Data, Brand, pipe, Effect } from "effect"
+
+// --- Dual APIs ---
+// Data-first (direct call):
+const doubled = Effect.map(Effect.succeed(21), (n) => n * 2)
+// Data-last (pipe-friendly):
+const doubled2 = Effect.succeed(21).pipe(Effect.map((n) => n * 2))
+
+// --- pipe() = Unix pipes for code ---
+const result = pipe(
+  "  hello world  ",
+  (s) => s.trim(),
+  (s) => s.toUpperCase(),
+  (s) => s.split(" ")
+) // ["HELLO", "WORLD"]
+
+// --- Branded types ---
+type UserId = string & Brand.Brand<"UserId">
+const UserId = Brand.nominal<UserId>()
+// UserId("abc") ✅   "abc" as UserId ❌ (bypasses constructor)
+
+// --- TaggedEnum with $is and $match ---
+type RemoteData = Data.TaggedEnum<{
+  Loading: {}
+  Success: { readonly data: string }
+  Failure: { readonly reason: string }
+}>
+const { Loading, Success, Failure, $is, $match } =
+  Data.taggedEnum<RemoteData>()
+
+const isLoading = $is("Loading")
+isLoading(Loading()) // true
+
+const describe = $match({
+  Loading: () => "Loading...",
+  Success: ({ data }) => \`Got: \${data}\`,
+  Failure: ({ reason }) => \`Error: \${reason}\`,
+})
+describe(Success({ data: "hello" })) // "Got: hello"`,
 				docsLink: "https://effect.website/docs/code-style/guidelines/",
 				trap: "Don't overthink style early on. Start with Effect.gen everywhere, then adopt pipe-based patterns as you get comfortable. The community generally recommends gen for logic and pipe for adding behaviors.",
+				practice: [
+					{
+						title: "Rewrite with pipe",
+						prompt:
+							"Convert this nested function call style into pipe style. Think of it like reading a recipe top-to-bottom instead of inside-out.",
+						startCode: `import { Effect } from "effect"
+
+// This works but reads inside-out:
+const program = Effect.flatMap(
+  Effect.map(
+    Effect.succeed(5),
+    (n) => n * 2
+  ),
+  (n) => Effect.succeed(\`Result: \${n}\`)
+)
+
+// TODO: Rewrite using .pipe() so it reads top-to-bottom`,
+						solution: `import { Effect } from "effect"
+
+// Reads top-to-bottom — each step feeds into the next
+const program = Effect.succeed(5).pipe(
+  Effect.map((n) => n * 2),
+  Effect.flatMap((n) => Effect.succeed(\`Result: \${n}\`))
+)
+// Effect<string, never, never>
+// Runs to: "Result: 10"`,
+					},
+					{
+						title: "Create branded types for a domain",
+						prompt:
+							"Create UserId and OrderId branded types so the compiler prevents mixing them up. Then try to pass a UserId where OrderId is expected.",
+						startCode: `import { Brand } from "effect"
+
+// TODO: Define UserId as a branded string
+type UserId = ???
+const UserId = ???
+
+// TODO: Define OrderId as a branded string
+type OrderId = ???
+const OrderId = ???
+
+// This function only accepts OrderId
+const getOrder = (id: OrderId) => \`Order: \${id}\`
+
+// TODO: This should work:
+const orderId = OrderId("order-1")
+getOrder(orderId)
+
+// TODO: This should NOT compile — uncomment to verify:
+// const userId = UserId("user-1")
+// getOrder(userId) // Type error!`,
+						solution: `import { Brand } from "effect"
+
+type UserId = string & Brand.Brand<"UserId">
+const UserId = Brand.nominal<UserId>()
+
+type OrderId = string & Brand.Brand<"OrderId">
+const OrderId = Brand.nominal<OrderId>()
+
+const getOrder = (id: OrderId) => \`Order: \${id}\`
+
+const orderId = OrderId("order-1")
+getOrder(orderId) // ✅ works
+
+const userId = UserId("user-1")
+// getOrder(userId)
+// ❌ Type error: Brand<"UserId"> is not assignable to Brand<"OrderId">
+// The compiler catches the bug at build time, not at runtime!`,
+					},
+					{
+						title: "Build a TaggedEnum with pattern matching",
+						prompt:
+							"Create a PaymentStatus TaggedEnum with Pending, Paid, and Failed variants. Then use $match to return a user-friendly message for each.",
+						startCode: `import { Data } from "effect"
+
+// TODO: Define PaymentStatus with three variants:
+// - Pending: {}
+// - Paid: { amount: number }
+// - Failed: { reason: string }
+type PaymentStatus = Data.TaggedEnum<{
+  ???
+}>
+
+// TODO: Destructure constructors, $is, and $match
+const { ??? } = Data.taggedEnum<PaymentStatus>()
+
+// TODO: Create a describe function using $match
+// Pending → "Payment pending..."
+// Paid → "Paid $<amount>"
+// Failed → "Failed: <reason>"
+const describe = ???`,
+						solution: `import { Data } from "effect"
+
+type PaymentStatus = Data.TaggedEnum<{
+  Pending: {}
+  Paid: { readonly amount: number }
+  Failed: { readonly reason: string }
+}>
+
+const { Pending, Paid, Failed, $is, $match } =
+  Data.taggedEnum<PaymentStatus>()
+
+const describe = $match({
+  Pending: () => "Payment pending...",
+  Paid: ({ amount }) => \`Paid $\${amount}\`,
+  Failed: ({ reason }) => \`Failed: \${reason}\`,
+})
+
+describe(Pending())           // "Payment pending..."
+describe(Paid({ amount: 50 })) // "Paid $50"
+describe(Failed({ reason: "Insufficient funds" }))
+// "Failed: Insufficient funds"
+
+// Bonus: $is gives you type guards
+const isPaid = $is("Paid")
+isPaid(Paid({ amount: 50 })) // true
+isPaid(Pending())             // false`,
+					},
+				],
 			},
 		],
 	},
