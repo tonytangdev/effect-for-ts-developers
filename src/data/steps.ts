@@ -4991,6 +4991,64 @@ const test = appConfig.pipe(
     ConfigProvider.fromJson({ HOST: "test", PORT: 3000, API_KEY: "xxx" })
   )
 )`,
+				practice: [
+					{
+						title: "Predict the failure",
+						prompt:
+							"What happens when you run this without setting env vars? What type does the error have?",
+						startCode: `import { Config, Effect } from "effect"
+
+const dbUrl = Config.string("DATABASE_URL")
+const port = Config.number("PORT")
+
+const app = Effect.gen(function* () {
+  const url = yield* dbUrl
+  const p = yield* port
+  return { url, port: p }
+})
+
+Effect.runSync(app)
+// What error type? What message?`,
+						solution: `// It throws a ConfigError (not a generic Error).
+// Message: "Missing data at DATABASE_URL: Expected DATABASE_URL to exist in the process context"
+// ConfigError is a tagged error — you can catchTag("ConfigError", ...)
+// This is why Config is better than process.env:
+//   process.env.DATABASE_URL → string | undefined (silent)
+//   Config.string("DATABASE_URL") → fails loudly with typed error`,
+					},
+					{
+						title: "Build a nested config",
+						prompt:
+							"Create a config that reads DB_HOST, DB_PORT, DB_NAME from env using Config.nested so they share a 'DB' prefix.",
+						startCode: `import { Config, Effect } from "effect"
+
+// Goal: read DB_HOST, DB_PORT, DB_NAME from env
+// Hint: build individual configs, combine with Config.all, then nest
+
+const dbConfig = ???
+
+const app = Effect.gen(function* () {
+  const config = yield* dbConfig
+  console.log(config) // { host: "localhost", port: 5432, name: "mydb" }
+})`,
+						solution: `import { Config, Effect } from "effect"
+
+// Config.all combines multiple configs into a struct
+// Config.nested adds a prefix to ALL keys in the combined config
+const dbConfig = Config.nested(
+  Config.all({
+    host: Config.string("HOST").pipe(Config.withDefault("localhost")),
+    port: Config.number("PORT").pipe(Config.withDefault(5432)),
+    name: Config.string("NAME"),
+  }),
+  "DB"
+)
+// Now reads: DB_HOST, DB_PORT, DB_NAME from env
+
+// TS equivalent: you'd manually do process.env.DB_HOST ?? "localhost"
+// and parse parseInt(process.env.DB_PORT ?? "5432") with no type safety`,
+					},
+				],
 			},
 			{
 				id: 27,
@@ -5041,6 +5099,89 @@ const fetchTodo = (id: number) => Effect.gen(function* () {
 const main = fetchTodo(1).pipe(
   Effect.provide(NodeHttpClient.layerUndici)
 )`,
+				practice: [
+					{
+						title: "Spot the missing layer",
+						prompt:
+							"This code compiles but crashes at runtime. Why? Fix it.",
+						startCode: `import { HttpClient } from "@effect/platform"
+import { Effect, Schema } from "effect"
+
+class Todo extends Schema.Class<Todo>("Todo")({
+  id: Schema.Number,
+  title: Schema.String,
+  completed: Schema.Boolean,
+}) {}
+
+const fetchTodo = Effect.gen(function* () {
+  const client = yield* HttpClient.HttpClient
+  const res = yield* client.get("https://jsonplaceholder.typicode.com/todos/1")
+  return yield* HttpClientResponse.schemaBodyJson(Todo)(res)
+})
+
+// This crashes:
+Effect.runPromise(fetchTodo)`,
+						solution: `import { HttpClient, HttpClientResponse, FetchHttpClient } from "@effect/platform"
+import { Effect, Schema } from "effect"
+
+class Todo extends Schema.Class<Todo>("Todo")({
+  id: Schema.Number,
+  title: Schema.String,
+  completed: Schema.Boolean,
+}) {}
+
+const fetchTodo = Effect.gen(function* () {
+  const client = yield* HttpClient.HttpClient
+  const res = yield* client.get("https://jsonplaceholder.typicode.com/todos/1")
+  return yield* HttpClientResponse.schemaBodyJson(Todo)(res)
+})
+
+// Fix: provide the HttpClient layer!
+// HttpClient is a SERVICE — it needs an implementation.
+// TS equivalent: fetch() is global. Effect's HttpClient is injected.
+Effect.runPromise(
+  fetchTodo.pipe(Effect.provide(FetchHttpClient.layer))
+)`,
+					},
+					{
+						title: "Decode a response with Schema",
+						prompt:
+							"Write an Effect that fetches a user from an API and decodes the response into a typed User schema. Handle the case where the API returns unexpected data.",
+						startCode: `import { HttpClient, HttpClientResponse, FetchHttpClient } from "@effect/platform"
+import { Effect, Schema } from "effect"
+
+// Define a User schema with: id (number), name (string), email (string)
+class User extends Schema.Class<User>("User")({
+  ???
+}) {}
+
+// Fetch and decode user by id
+const fetchUser = (id: number) => Effect.gen(function* () {
+  const client = yield* HttpClient.HttpClient
+  // Make the request and decode with Schema
+  ???
+})`,
+						solution: `import { HttpClient, HttpClientResponse, FetchHttpClient } from "@effect/platform"
+import { Effect, Schema } from "effect"
+
+class User extends Schema.Class<User>("User")({
+  id: Schema.Number,
+  name: Schema.String,
+  email: Schema.String,
+}) {}
+
+const fetchUser = (id: number) => Effect.gen(function* () {
+  const client = yield* HttpClient.HttpClient
+  const res = yield* client.get(
+    \`https://jsonplaceholder.typicode.com/users/\${id}\`
+  )
+  // schemaBodyJson decodes AND validates — bad data goes to E channel
+  return yield* HttpClientResponse.schemaBodyJson(User)(res)
+})
+// Type: Effect<User, HttpClientError | ParseError, HttpClient>
+// TS equivalent: fetch().then(r => r.json()) gives you "any" — no validation`,
+					},
+				],
 			},
 			{
 				id: 28,
@@ -5081,6 +5222,82 @@ const processConfig = Effect.gen(function* () {
   const parsed = yield* Schema.decodeUnknown(AppConfig)(JSON.parse(raw))
   return parsed
 }).pipe(Effect.provide(NodeFileSystem.layer))`,
+				practice: [
+					{
+						title: "Why is FileSystem a service?",
+						prompt:
+							"In plain Node.js you'd just call fs.readFileSync(). Why does Effect make FileSystem a service you must inject? Name two concrete benefits.",
+						startCode: `// Plain Node.js:
+import fs from "node:fs"
+const data = fs.readFileSync("config.json", "utf-8")
+
+// Effect:
+import { FileSystem } from "@effect/platform"
+const data = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem
+  return yield* fs.readFileString("config.json")
+})
+
+// Why the extra ceremony? What do you gain?`,
+						solution: `// Benefit 1: TESTABILITY
+// You can provide a mock FileSystem in tests — no temp files needed:
+const MockFS = Layer.succeed(FileSystem.FileSystem, {
+  readFileString: () => Effect.succeed('{"port": 3000}'),
+  // ... other methods
+})
+
+// Benefit 2: CROSS-PLATFORM
+// Same code runs on Node, Bun, or browser (with different layers):
+//   Effect.provide(NodeFileSystem.layer)  — for Node
+//   Effect.provide(BunFileSystem.layer)   — for Bun
+// Your business logic doesn't import "node:fs" directly.
+
+// Bonus: typed errors. PlatformError tells you exactly what failed
+// (NotFound, PermissionDenied, etc.) — no try/catch guessing.`,
+					},
+					{
+						title: "Read, validate, and write a config file",
+						prompt:
+							"Read a JSON config file, validate it with Schema, add a 'version' field, and write it back.",
+						startCode: `import { FileSystem } from "@effect/platform"
+import { Effect, Schema } from "effect"
+
+const AppConfig = Schema.Struct({
+  host: Schema.String,
+  port: Schema.Number,
+})
+
+// 1. Read config.json
+// 2. Parse + validate with Schema
+// 3. Add version: "1.0.0"
+// 4. Write back to config.json
+
+const migrate = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem
+  ???
+})`,
+						solution: `import { FileSystem } from "@effect/platform"
+import { Effect, Schema } from "effect"
+
+const AppConfig = Schema.Struct({
+  host: Schema.String,
+  port: Schema.Number,
+})
+
+const migrate = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem
+  // Read
+  const raw = yield* fs.readFileString("config.json")
+  // Validate — parse errors go to E channel automatically
+  const config = yield* Schema.decodeUnknown(AppConfig)(JSON.parse(raw))
+  // Transform and write back
+  const updated = { ...config, version: "1.0.0" }
+  yield* fs.writeFileString("config.json", JSON.stringify(updated, null, 2))
+  return updated
+})
+// Type: Effect<{host, port, version}, PlatformError | ParseError, FileSystem>`,
+					},
+				],
 			},
 			{
 				id: 29,
@@ -5128,6 +5345,81 @@ const transfer = Effect.gen(function* () {
     yield* sql\`UPDATE accounts SET balance = balance + 100 WHERE id = 2\`
   }))
 })`,
+				practice: [
+					{
+						title: "Spot the SQL injection",
+						prompt:
+							"One of these queries is safe, the other is vulnerable. Which is which and why?",
+						startCode: `import { SqlClient } from "@effect/sql"
+import { Effect } from "effect"
+
+const getUserA = (name: string) => Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  return yield* sql\`SELECT * FROM users WHERE name = \${name}\`
+})
+
+const getUserB = (name: string) => Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  const query = "SELECT * FROM users WHERE name = '" + name + "'"
+  return yield* sql.unsafe(query)
+})
+
+// Which is safe? Which is vulnerable?`,
+						solution: `// getUserA is SAFE — tagged template literals parameterize automatically.
+// sql\`... \${name}\` becomes a prepared statement: "SELECT * FROM users WHERE name = $1"
+// The value is sent separately — can't break out of the string.
+
+// getUserB is VULNERABLE — string concatenation means name could be:
+//   "'; DROP TABLE users; --"
+// sql.unsafe() runs raw SQL with no parameterization.
+
+// Rule: ALWAYS use tagged templates with SqlClient.
+// TS equivalent: same risk exists with any ORM's .raw() method.
+// Effect's sql tagged template makes the safe path the easy path.`,
+					},
+					{
+						title: "Write a typed query with Schema",
+						prompt:
+							"Write a query that fetches users and decodes each row into a Schema-validated type.",
+						startCode: `import { SqlClient, SqlSchema } from "@effect/sql"
+import { Effect, Schema } from "effect"
+
+// Define a User schema
+const User = Schema.Struct({
+  id: Schema.Number,
+  name: Schema.String,
+  email: Schema.String,
+})
+
+// Write a function that queries all users and returns typed results
+const getAllUsers = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  ???
+})`,
+						solution: `import { SqlClient, SqlSchema } from "@effect/sql"
+import { Effect, Schema } from "effect"
+
+const User = Schema.Struct({
+  id: Schema.Number,
+  name: Schema.String,
+  email: Schema.String,
+})
+
+const getAllUsers = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  // SqlSchema.findAll creates a query that decodes rows with Schema
+  const query = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: User,
+    execute: () => sql\`SELECT id, name, email FROM users\`
+  })
+  return yield* query(undefined)
+})
+// Type: Effect<Array<{id: number, name: string, email: string}>, SqlError | ParseError, SqlClient>
+// Every row is validated — if the DB returns unexpected data, you get ParseError.
+// TS equivalent: Prisma gives you typed results but can't validate at runtime.`,
+					},
+				],
 			},
 			{
 				id: 30,
@@ -5180,6 +5472,659 @@ const result = await runtime.runPromise(handleRequest(req))
 
 // Graceful shutdown:
 process.on("SIGTERM", () => runtime.dispose())`,
+				practice: [
+					{
+						title: "Sketch a service + layer",
+						prompt:
+							"Design a UserRepository service with getById and create methods. Then build a layer that uses SqlClient internally.",
+						startCode: `import { Context, Effect, Layer } from "effect"
+import { SqlClient } from "@effect/sql"
+
+// 1. Define the service interface
+class UserRepository extends Context.Tag("UserRepository")<
+  UserRepository,
+  {
+    ???
+  }
+>() {}
+
+// 2. Build a Layer that implements it using SqlClient
+const UserRepositoryLive = Layer.effect(
+  UserRepository,
+  Effect.gen(function* () {
+    ???
+  })
+)`,
+						solution: `import { Context, Effect, Layer, Schema } from "effect"
+import { SqlClient, SqlSchema } from "@effect/sql"
+
+// Service interface — pure capabilities, no implementation details
+class UserRepository extends Context.Tag("UserRepository")<
+  UserRepository,
+  {
+    readonly getById: (id: number) => Effect.Effect<User, NotFoundError>
+    readonly create: (name: string, email: string) => Effect.Effect<User>
+  }
+>() {}
+
+// Layer wires the implementation to a real database
+const UserRepositoryLive = Layer.effect(
+  UserRepository,
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    return {
+      getById: (id) => Effect.gen(function* () {
+        const rows = yield* sql\`SELECT * FROM users WHERE id = \${id}\`
+        if (rows.length === 0) return yield* new NotFoundError({ id })
+        return rows[0] as User
+      }),
+      create: (name, email) => Effect.gen(function* () {
+        const rows = yield* sql\`INSERT INTO users (name, email) VALUES (\${name}, \${email}) RETURNING *\`
+        return rows[0] as User
+      }),
+    }
+  })
+)
+// UserRepositoryLive requires SqlClient — compose it into your AppLayer`,
+					},
+					{
+						title: "Map it to Express/Nest mental model",
+						prompt:
+							"For each Express/NestJS concept, write the Effect equivalent.",
+						startCode: `// Fill in the Effect equivalent for each:
+
+// Express: app.listen(3000)
+// Effect: ???
+
+// NestJS: @Injectable() class UserService {}
+// Effect: ???
+
+// Express: app.use(errorHandler)
+// Effect: ???
+
+// NestJS: @Module({ providers: [UserService, DbService] })
+// Effect: ???
+
+// Express: process.on("SIGTERM", () => server.close())
+// Effect: ???`,
+						solution: `// Express: app.listen(3000)
+// Effect: ManagedRuntime.make(AppLayer) — starts all services, holds the runtime
+
+// NestJS: @Injectable() class UserService {}
+// Effect: class UserService extends Context.Tag("UserService")<UserService, {...}>() {}
+//         No decorators. The type system IS the DI container.
+
+// Express: app.use(errorHandler)
+// Effect: Effect.catchTag("NotFound", handler) at the route/handler level
+//         Errors are typed — no middleware guessing what was thrown.
+
+// NestJS: @Module({ providers: [UserService, DbService] })
+// Effect: Layer.mergeAll(UserServiceLive, DbServiceLive)
+//         Dependencies are resolved at compile time via the R type parameter.
+
+// Express: process.on("SIGTERM", () => server.close())
+// Effect: Effect.addFinalizer(() => ...) inside the Layer
+//         ManagedRuntime.dispose() triggers ALL finalizers in reverse order.`,
+					},
+				],
+			},
+			{
+				id: 31,
+				title: "CLI Applications",
+				subtitle: "@effect/cli for type-safe CLIs",
+				tweet: false,
+				duration: "45 min",
+				content:
+					"@effect/cli lets you build fully typed CLI applications with commands, options, and arguments — all validated with Schema. Think commander.js but with Effect's type safety and composability.",
+				keyIdea:
+					"Command.make defines commands with typed Args and Options. Subcommands compose via Command.withSubcommands. Built-in --help, --version, and shell completions come free.",
+				concepts: [
+					{
+						name: "Command.make(name, config, handler)",
+						desc: "Define a CLI command. Config is an object of Args/Options. Handler receives parsed, typed values.",
+					},
+					{
+						name: "Args.text / Args.integer / Args.file",
+						desc: "Positional arguments. Typed constructors — Args.integer parses to number automatically.",
+					},
+					{
+						name: "Options.text(name) / Options.boolean(name)",
+						desc: "Named flags like --verbose or --output <path>. Chain with withAlias for short forms (-v).",
+					},
+					{
+						name: "Command.withSubcommands",
+						desc: "Nest commands like git add, git clone. Parent config is accessible from subcommand handlers.",
+					},
+					{
+						name: "Args.withSchema / Options.withSchema",
+						desc: "Validate args/options with Schema. Port must be 1-65535? Schema.Int.pipe(Schema.between(1, 65535)).",
+					},
+					{
+						name: "Command.run(command, { name, version })",
+						desc: "Creates the CLI entry point. Pair with NodeRuntime.runMain to execute.",
+					},
+				],
+				docsLink: "https://effect.website/docs/cli/",
+				trap: "Options must come before subcommand names and positional args in the CLI input. This is a parsing rule, not a bug — it matches POSIX conventions.",
+				tsCode: `// commander.js equivalent:
+import { program } from "commander"
+
+program
+  .command("greet <name>")
+  .option("-l, --loud", "shout the greeting")
+  .action((name, opts) => {
+    // name is string, opts.loud is boolean | undefined
+    // No validation. No typed errors. No composition.
+    const msg = \`Hello, \${name}!\`
+    console.log(opts.loud ? msg.toUpperCase() : msg)
+  })
+
+program.parse()`,
+				code: `import { Args, Command, Options } from "@effect/cli"
+import { NodeContext, NodeRuntime } from "@effect/platform-node"
+import { Console, Effect } from "effect"
+
+const name = Args.text({ name: "name" })
+const loud = Options.boolean("loud").pipe(Options.withAlias("l"))
+
+const greet = Command.make("greet", { name, loud }, ({ name, loud }) => {
+  const msg = \`Hello, \${name}!\`
+  return Console.log(loud ? msg.toUpperCase() : msg)
+})
+
+const cli = Command.run(greet, { name: "greeter", version: "1.0.0" })
+
+Effect.suspend(() => cli(process.argv)).pipe(
+  Effect.provide(NodeContext.layer),
+  NodeRuntime.runMain
+)
+// $ greeter greet Alice --loud
+// HELLO, ALICE!
+// Built-in: greeter --help, greeter --version, greeter --completions bash`,
+				practice: [
+					{
+						title: "Build a file converter CLI",
+						prompt:
+							"Create a CLI command that takes an input file (positional arg), an optional --output flag, and a --format choice of 'json' or 'csv'.",
+						startCode: `import { Args, Command, Options } from "@effect/cli"
+import { Console, Effect } from "effect"
+
+// Define:
+// 1. A positional arg for the input file
+// 2. An optional --output flag (defaults to "output.txt")
+// 3. A --format choice: "json" or "csv"
+// 4. A command that logs the parsed config
+
+const inputFile = ???
+const output = ???
+const format = ???
+
+const convert = Command.make("convert", { ??? }, ({ ??? }) => {
+  ???
+})`,
+						solution: `import { Args, Command, Options } from "@effect/cli"
+import { Console, Effect } from "effect"
+
+const inputFile = Args.file({ name: "input", exists: "yes" })
+const output = Options.file("output").pipe(
+  Options.withAlias("o"),
+  Options.withDefault("output.txt")
+)
+const format = Options.choiceWithValue("format", [
+  ["json", "json" as const],
+  ["csv", "csv" as const],
+]).pipe(Options.withAlias("f"))
+
+const convert = Command.make(
+  "convert",
+  { inputFile, output, format },
+  ({ inputFile, output, format }) =>
+    Console.log(\`Converting \${inputFile} to \${format}, output: \${output}\`)
+)
+// Type safety: format is "json" | "csv", not string
+// inputFile validated to exist on disk
+// output has a default — always present`,
+					},
+					{
+						title: "Add a subcommand",
+						prompt:
+							"Given a root 'db' command with a --connection option, add 'migrate' and 'seed' subcommands that can access the parent's connection string.",
+						startCode: `import { Args, Command, Options } from "@effect/cli"
+import { Console, Effect } from "effect"
+
+const connection = Options.text("connection").pipe(
+  Options.withAlias("c"),
+  Options.withDefault("postgres://localhost:5432/mydb")
+)
+
+const db = Command.make("db", { connection })
+
+// Add two subcommands:
+// 1. "migrate" — no extra args, logs "Migrating <connection>"
+// 2. "seed" — takes a positional file arg, logs "Seeding <connection> from <file>"
+// Both need access to the parent's connection option
+
+???`,
+						solution: `import { Args, Command, Options } from "@effect/cli"
+import { Console, Effect } from "effect"
+
+const connection = Options.text("connection").pipe(
+  Options.withAlias("c"),
+  Options.withDefault("postgres://localhost:5432/mydb")
+)
+
+const db = Command.make("db", { connection })
+
+// Subcommand handlers use Effect.flatMap on the parent command
+// to access parent config — Command is itself an Effect!
+const migrate = Command.make("migrate", {}, () =>
+  Effect.flatMap(db, (parent) =>
+    Console.log(\`Migrating \${parent.connection}\`)
+  )
+)
+
+const seedFile = Args.file({ name: "seed-file" })
+const seed = Command.make("seed", { seedFile }, ({ seedFile }) =>
+  Effect.flatMap(db, (parent) =>
+    Console.log(\`Seeding \${parent.connection} from \${seedFile}\`)
+  )
+)
+
+const command = db.pipe(Command.withSubcommands([migrate, seed]))
+// $ db --connection postgres://prod:5432/app migrate
+// $ db seed data.sql`,
+					},
+				],
+			},
+			{
+				id: 32,
+				title: "Testing with Effect",
+				subtitle: "@effect/vitest, TestClock, mocking services",
+				tweet: true,
+				duration: "45 min",
+				content:
+					"@effect/vitest provides Effect-aware test runners that handle services, scopes, and test clocks automatically. Combined with Layer-based mocking, you get deterministic, isolated tests with zero monkey-patching.",
+				keyIdea:
+					"it.effect runs your test as an Effect with TestServices (TestClock, controlled random) auto-provided. Mock any service by swapping its Layer — no jest.mock, no dependency injection frameworks.",
+				concepts: [
+					{
+						name: "it.effect(name, () => Effect)",
+						desc: "Run an Effect as a test. TestClock and test services provided automatically. Default 5s timeout.",
+					},
+					{
+						name: "it.scoped(name, () => Effect)",
+						desc: "Like it.effect but provides a Scope — use for tests that need resource cleanup.",
+					},
+					{
+						name: "it.live(name, () => Effect)",
+						desc: "Runs with REAL clock and services. Use for integration tests hitting actual APIs.",
+					},
+					{
+						name: "TestClock.adjust('5 seconds')",
+						desc: "Advance the test clock. Sleeping fibers wake up. Fork the sleeper FIRST, then adjust.",
+					},
+					{
+						name: "Layer.succeed(Service, mockImpl)",
+						desc: "Create a mock layer. Provide it in your test to swap a real service for a fake.",
+					},
+					{
+						name: "it.layer(layer)('describe', (it) => ...)",
+						desc: "Share a Layer across all tests in a describe block. Layer is created once, torn down after.",
+					},
+				],
+				docsLink: "https://effect.website/docs/vitest/",
+				trap: "TestClock starts at time 0. If you yield* Effect.sleep('5 seconds') directly (without forking), the test hangs forever — no one advances the clock! Fork the sleeping fiber first, then adjust.",
+				tsCode: `// Plain vitest + jest.mock:
+import { vi, describe, it, expect } from "vitest"
+
+// Must mock at module level — fragile, order-dependent
+vi.mock("./user-repo", () => ({
+  getUser: vi.fn().mockResolvedValue({ id: "1", name: "Test" })
+}))
+
+it("gets user", async () => {
+  const user = await getUser("1")
+  expect(user.name).toBe("Test")
+})
+
+// Mocking time:
+vi.useFakeTimers()
+vi.advanceTimersByTime(5000) // global, affects everything`,
+				code: `import { it, expect } from "@effect/vitest"
+import { Effect, Layer, TestClock, Fiber } from "effect"
+
+// Mock a service by providing a test Layer — no jest.mock needed
+const MockUserRepo = Layer.succeed(UserRepo, {
+  getUser: (id) => Effect.succeed({ id, name: "Test User" })
+})
+
+it.effect("gets user from repo", () =>
+  Effect.gen(function* () {
+    const repo = yield* UserRepo
+    const user = yield* repo.getUser("1")
+    expect(user.name).toBe("Test User")
+  }).pipe(Effect.provide(MockUserRepo))
+)
+
+// TestClock: fork sleeper, then advance
+it.effect("timeout after 5s", () =>
+  Effect.gen(function* () {
+    const fiber = yield* Effect.sleep("10 seconds").pipe(
+      Effect.as("done"),
+      Effect.timeout("5 seconds"),
+      Effect.fork
+    )
+    yield* TestClock.adjust("5 seconds")
+    const result = yield* Fiber.join(fiber)
+    expect(result).toBeUndefined() // timed out
+  })
+)`,
+				practice: [
+					{
+						title: "Mock a service in a test",
+						prompt:
+							"Write a test for a NotificationService.send method. Mock the EmailClient dependency to capture what was sent instead of actually sending.",
+						startCode: `import { it, expect } from "@effect/vitest"
+import { Context, Effect, Layer, Ref } from "effect"
+
+class EmailClient extends Context.Tag("EmailClient")<
+  EmailClient,
+  { readonly send: (to: string, body: string) => Effect.Effect<void> }
+>() {}
+
+class NotificationService extends Context.Tag("NotificationService")<
+  NotificationService,
+  { readonly notify: (userId: string, msg: string) => Effect.Effect<void> }
+>() {}
+
+// Real implementation (don't use in test):
+const NotificationServiceLive = Layer.effect(
+  NotificationService,
+  Effect.gen(function* () {
+    const email = yield* EmailClient
+    return {
+      notify: (userId, msg) => email.send(userId + "@example.com", msg)
+    }
+  })
+)
+
+// Write the test:
+it.effect("sends email notification", () =>
+  Effect.gen(function* () {
+    ???
+  })
+)`,
+						solution: `import { it, expect } from "@effect/vitest"
+import { Context, Effect, Layer, Ref } from "effect"
+
+// ... (service definitions above)
+
+it.effect("sends email notification", () =>
+  Effect.gen(function* () {
+    // Use Ref to capture sent emails
+    const sent = yield* Ref.make<Array<{ to: string; body: string }>>([])
+
+    // Mock EmailClient that records calls instead of sending
+    const MockEmail = Layer.succeed(EmailClient, {
+      send: (to, body) => Ref.update(sent, (arr) => [...arr, { to, body }])
+    })
+
+    // Provide mock to the real NotificationService
+    const testLayer = NotificationServiceLive.pipe(Layer.provide(MockEmail))
+
+    yield* Effect.gen(function* () {
+      const svc = yield* NotificationService
+      yield* svc.notify("alice", "Hello!")
+    }).pipe(Effect.provide(testLayer))
+
+    const emails = yield* Ref.get(sent)
+    expect(emails).toEqual([{ to: "alice@example.com", body: "Hello!" }])
+  })
+)
+// No jest.mock. No monkey-patching. Layer swaps are type-checked.`,
+					},
+					{
+						title: "Test a scheduled retry with TestClock",
+						prompt:
+							"Write a test for an Effect that retries 3 times with 1-second delays. Use TestClock to make it instant.",
+						startCode: `import { it, expect } from "@effect/vitest"
+import { Effect, TestClock, Fiber, Ref, Schedule } from "effect"
+
+// This effect fails twice then succeeds on the 3rd attempt
+// It uses Schedule.recurs(2) with Schedule.spaced("1 second")
+// Without TestClock, this test would take 2 real seconds.
+
+it.effect("retries with delay", () =>
+  Effect.gen(function* () {
+    const attempts = yield* Ref.make(0)
+
+    const unstable = Effect.gen(function* () {
+      const count = yield* Ref.updateAndGet(attempts, (n) => n + 1)
+      if (count < 3) return yield* Effect.fail("not yet")
+      return "success"
+    })
+
+    // 1. Add retry schedule: 2 retries, 1 second apart
+    // 2. Fork it (so TestClock can advance)
+    // 3. Advance the clock
+    // 4. Assert result
+    ???
+  })
+)`,
+						solution: `import { it, expect } from "@effect/vitest"
+import { Effect, TestClock, Fiber, Ref, Schedule } from "effect"
+
+it.effect("retries with delay", () =>
+  Effect.gen(function* () {
+    const attempts = yield* Ref.make(0)
+
+    const unstable = Effect.gen(function* () {
+      const count = yield* Ref.updateAndGet(attempts, (n) => n + 1)
+      if (count < 3) return yield* Effect.fail("not yet")
+      return "success"
+    })
+
+    // Retry up to 2 times, 1 second between each
+    const withRetry = unstable.pipe(
+      Effect.retry(Schedule.recurs(2).pipe(Schedule.intersect(Schedule.spaced("1 second"))))
+    )
+
+    // Fork so TestClock can control time
+    const fiber = yield* Effect.fork(withRetry)
+
+    // Advance past both retry delays
+    yield* TestClock.adjust("1 second") // triggers retry #1
+    yield* TestClock.adjust("1 second") // triggers retry #2
+
+    const result = yield* Fiber.join(fiber)
+    expect(result).toBe("success")
+    expect(yield* Ref.get(attempts)).toBe(3)
+  })
+)
+// This test runs instantly — TestClock skips the real waits.
+// TS equivalent: vi.useFakeTimers() + vi.advanceTimersByTime(1000)
+// But TestClock is fiber-aware — only sleeping fibers are affected.`,
+					},
+				],
+			},
+			{
+				id: 33,
+				title: "DevTools & Developer Experience",
+				subtitle: "Language service, ESLint, VS Code extension",
+				tweet: false,
+				duration: "30 min",
+				content:
+					"Effect has first-class developer tooling: a TypeScript language service plugin with 50+ diagnostics, a VS Code extension with fiber debugging, and an ESLint plugin. These catch mistakes at dev time, not runtime.",
+				keyIdea:
+					"@effect/language-service is a TS plugin that understands Effect types. It catches floating effects, missing service requirements, and suggests refactors — all inline in your editor. The VS Code extension adds real-time span tracing and fiber inspection.",
+				concepts: [
+					{
+						name: "@effect/language-service",
+						desc: "TS plugin with 50+ diagnostics. Install, add to tsconfig plugins, and use workspace TS version.",
+					},
+					{
+						name: "floatingEffect diagnostic",
+						desc: "Catches Effects that aren't yielded or assigned — the #1 beginner mistake. Like an unused Promise warning, but better.",
+					},
+					{
+						name: "Refactors: async → Effect.gen",
+						desc: "One-click convert async/await functions to Effect.gen with typed errors. Also: pipe ↔ data-first, remove unnecessary gen.",
+					},
+					{
+						name: "Layer hover → dependency graph",
+						desc: "Hover a Layer variable to see a Mermaid dependency graph of all services it provides and requires.",
+					},
+					{
+						name: "VS Code extension debugger",
+						desc: "Inspect running fibers, view span stacks, and 'pause on defect' — breakpoints that trigger on Effect failures.",
+					},
+					{
+						name: "@effect/experimental DevTools.layer()",
+						desc: "Add to your app for real-time span tracing in the VS Code panel. Connect via WebSocket on port 34437.",
+					},
+				],
+				docsLink: "https://effect.website/docs/getting-started/devtools/",
+				trap: "The VS Code extension does NOT include the language service. You must install @effect/language-service per-project AND set your editor to use the workspace TypeScript version (not the built-in one).",
+				code: `// 1. Install:
+// npm install @effect/language-service --save-dev
+
+// 2. tsconfig.json:
+// {
+//   "compilerOptions": {
+//     "plugins": [{ "name": "@effect/language-service" }]
+//   }
+// }
+
+// 3. VS Code: Cmd+Shift+P → "TypeScript: Select TypeScript Version" → "Use Workspace Version"
+
+// Now you get:
+const oops = Effect.succeed(42)  // ⚠️ floatingEffect: Effect not used
+// yield* oops                   // fix: yield it or assign it
+
+// One-click refactors:
+async function getUser(id: string) {    // 💡 "Convert to Effect.gen"
+  const res = await fetch(\`/api/\${id}\`)
+  if (!res.ok) throw new Error("fail")
+  return res.json()
+}
+
+// 4. Real-time tracing (VS Code extension + @effect/experimental):
+import { DevTools } from "@effect/experimental"
+const DevToolsLive = DevTools.layer() // connects to VS Code on port 34437
+
+// Provide before other tracing layers:
+myApp.pipe(
+  Effect.provide(DevToolsLive),
+  NodeRuntime.runMain
+)`,
+				practice: [
+					{
+						title: "Spot the diagnostics",
+						prompt:
+							"The language service would flag multiple issues in this code. Identify each diagnostic and the fix.",
+						startCode: `import { Effect, Console } from "effect"
+
+const app = Effect.gen(function* () {
+  // Issue 1:
+  Effect.succeed("hello")
+
+  // Issue 2:
+  yield Effect.fail("oops")
+
+  // Issue 3:
+  try {
+    const data = yield* fetchData()
+  } catch (e) {
+    console.log("error:", e)
+  }
+
+  // Issue 4:
+  const result = Effect.gen(function* () {
+    return yield* Console.log("done")
+  })
+
+  return "ok"
+})`,
+						solution: `// Issue 1: floatingEffect
+// Effect.succeed("hello") creates an Effect but doesn't use it.
+// Fix: yield* Effect.succeed("hello") or remove it.
+
+// Issue 2: missingStarInYieldEffectGen
+// "yield" instead of "yield*" in Effect.gen. Effect won't execute.
+// Fix: yield* Effect.fail("oops")
+
+// Issue 3: tryCatchInEffectGen
+// try/catch inside Effect.gen — errors should flow through E channel.
+// Fix: use Effect.catchAll or Effect.catchTag instead of try/catch.
+// Also: console.log should be Console.log (globalConsoleInEffect)
+
+// Issue 4: floatingEffect + unnecessaryEffectGen
+// "result" holds an Effect but is never yielded.
+// Also: single-yield gen is unnecessary — just use Console.log("done") directly.
+// Fix: yield* Console.log("done")`,
+					},
+					{
+						title: "Match the diagnostic to the rule",
+						prompt:
+							"For each code snippet, name the language service diagnostic that would fire.",
+						startCode: `// A)
+const x = Effect.succeed(42)
+// Never used anywhere
+
+// B)
+Effect.runSync(
+  Effect.gen(function* () {
+    yield* Effect.runSync(innerEffect)
+  })
+)
+
+// C)
+const layer = Layer.mergeAll(
+  DbLive,          // requires ConfigLive
+  ConfigLive,      // provides Config
+)
+
+// D)
+async function loadUser(id: string) {
+  const res = await fetch(\`/api/users/\${id}\`)
+  return res.json()
+}
+// Used inside an Effect.gen
+
+// E)
+Effect.gen(function* () {
+  return yield* Effect.succeed(42)
+}).pipe(
+  Effect.provide(SomeLayer),
+  Effect.provide(OtherLayer)
+)
+
+// Match each to one of:
+// floatingEffect, runEffectInsideEffect, layerMergeAllWithDependencies,
+// asyncFunction, multipleEffectProvide`,
+						solution: `// A) floatingEffect
+// Effect.succeed(42) is created but never yielded, returned, or assigned to
+// anything that gets used. The effect is "floating" — it does nothing.
+
+// B) runEffectInsideEffect
+// Calling Effect.runSync() inside Effect.gen is an anti-pattern.
+// You're escaping the Effect system and losing error tracking.
+// Fix: yield* innerEffect directly.
+
+// C) layerMergeAllWithDependencies
+// Layer.mergeAll is for independent layers. DbLive depends on ConfigLive,
+// so they have interdependencies. Fix: DbLive.pipe(Layer.provide(ConfigLive))
+
+// D) asyncFunction
+// This async function uses fetch and could be converted to Effect.gen
+// with HttpClient for full type safety. The diagnostic suggests the refactor.
+
+// E) multipleEffectProvide
+// Chained .provide() calls should be combined into one:
+// Effect.provide(Layer.merge(SomeLayer, OtherLayer))
+// Multiple provides can cause unexpected layer instantiation.`,
+					},
+				],
 			},
 		],
 	},
@@ -5201,6 +6146,7 @@ export const TWEET_TEMPLATES: Record<number, string> = {
 	25: `Finished the core @EffectTS_ curriculum!\n\nBiggest takeaways:\n- Effect<A, E, R> — one type to rule them all\n- Generators for logic, pipes for behavior\n- Services + Layers = testable by default\n- Schema for validation + serialization\n\nNow onto the ecosystem.\n\n#EffectTS #TypeScript`,
 	27: `@effect/platform's HttpClient changed how I think about HTTP in TypeScript:\n\n- It's a SERVICE you inject (mockable!)\n- Schema validates responses automatically\n- Errors are typed, not thrown\n- Same code works Node/Bun/browser\n\nNo more raw fetch().\n\n#EffectTS`,
 	30: `Finished my @EffectTS_ journey — here's the production pattern:\n\n1. Services define capabilities\n2. Layers wire dependencies\n3. Config loads settings\n4. Schema validates boundaries\n5. ManagedRuntime runs everything\n\nOne type. Full stack. Type-safe.\n\n#EffectTS #TypeScript`,
+	32: `Testing @EffectTS_ apps is a different game:\n\n❌ jest.mock("./db")\n✅ Layer.succeed(DbService, mockImpl)\n\n❌ vi.useFakeTimers()\n✅ TestClock.adjust("5 seconds")\n\nNo monkey-patching. No global state. Just swap Layers.\n\n#EffectTS #TypeScript`,
 };
 
 export function getPhaseBySlug(slug: string): Phase | undefined {
