@@ -1,7 +1,6 @@
 import type { Phase, Step } from "@/data/steps";
 import { CodeBlock } from "./code-block";
 import { StepActions } from "./step-actions";
-import { TweetSection } from "./tweet-section";
 
 interface StepCardProps {
   step: Step;
@@ -28,17 +27,6 @@ export function StepCard({ step, phase }: StepCardProps) {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          {step.tweet && (
-            <svg
-              viewBox="0 0 24 24"
-              width="16"
-              height="16"
-              fill="currentColor"
-              className="text-tweet opacity-60"
-            >
-              <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-            </svg>
-          )}
           <span className="text-[10px] text-text-muted">{step.duration}</span>
         </div>
       </div>
@@ -166,9 +154,6 @@ export function StepCard({ step, phase }: StepCardProps) {
           </span>
           {step.trap}
         </div>
-
-        {/* Tweet */}
-        {step.tweet && <TweetSection stepId={step.id} />}
 
         {/* Actions */}
         <StepActions step={step} />

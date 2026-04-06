@@ -12,12 +12,9 @@
   --color-text-body: var(--th-text-body);
   --color-accent: var(--th-accent);
   --color-accent-dark: var(--th-accent-dark);
-  --color-tweet: var(--th-tweet);
   --color-trap: var(--th-trap);
   --color-trap-bg: var(--th-trap-bg);
   --color-trap-border: var(--th-trap-border);
-  --color-tweet-bg: var(--th-tweet-bg);
-  --color-tweet-border: var(--th-tweet-border);
   --color-overlay: var(--th-overlay);
   --font-mono: "IBM Plex Mono", "JetBrains Mono", ui-monospace, monospace;
   --font-serif: "Playfair Display", ui-serif, Georgia, serif;
@@ -36,12 +33,9 @@
   --th-text-body: #b8b4ac;
   --th-accent: #C4A67D;
   --th-accent-dark: #8B7355;
-  --th-tweet: #5B8DEF;
   --th-trap: #c89080;
   --th-trap-bg: rgba(200, 100, 80, 0.08);
   --th-trap-border: rgba(200, 100, 80, 0.2);
-  --th-tweet-bg: rgba(91, 141, 239, 0.06);
-  --th-tweet-border: rgba(91, 141, 239, 0.15);
   --th-overlay: rgba(0, 0, 0, 0.6);
   color-scheme: dark;
 }
@@ -59,12 +53,9 @@
   --th-text-body: #4a4540;
   --th-accent: #9B7B4F;
   --th-accent-dark: #7A5F3C;
-  --th-tweet: #3B6BCF;
   --th-trap: #b04030;
   --th-trap-bg: rgba(176, 64, 48, 0.06);
   --th-trap-border: rgba(176, 64, 48, 0.15);
-  --th-tweet-bg: rgba(59, 107, 207, 0.06);
-  --th-tweet-border: rgba(59, 107, 207, 0.12);
   --th-overlay: rgba(0, 0, 0, 0.3);
   color-scheme: light;
 }

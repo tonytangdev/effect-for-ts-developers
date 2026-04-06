@@ -14,7 +14,6 @@ export interface Step {
 	id: number;
 	title: string;
 	subtitle: string;
-	tweet: boolean;
 	duration: string;
 	content: string;
 	keyIdea: string;
@@ -44,7 +43,6 @@ export const PHASES: Phase[] = [
 				id: 1,
 				title: "The Mental Model",
 				subtitle: "Why Effect exists & what it replaces",
-				tweet: false,
 				duration: "10 min",
 				content:
 					"Before writing any code, understand what Effect actually is. It's NOT just another utility library — it's a complete paradigm for describing programs.",
@@ -119,7 +117,6 @@ const c = Effect.sync(() => Math.random())
 				id: 2,
 				title: "Creating Effects",
 				subtitle: "succeed, fail, sync, promise, try",
-				tweet: false,
 				duration: "15 min",
 				content:
 					"Learn the constructors — how to wrap existing values, sync code, and async code into the Effect world.",
@@ -236,7 +233,6 @@ const fetched = Effect.tryPromise({
 				id: 3,
 				title: "Running Effects",
 				subtitle: "runSync, runPromise, runPromiseExit",
-				tweet: false,
 				duration: "15 min",
 				content:
 					"Effects are blueprints. Runners execute them. Choose the right runner for your context.",
@@ -329,7 +325,6 @@ Effect.runPromiseExit(program)   // returns Promise<Exit>, never rejects`,
 				id: 4,
 				title: "Generators (Effect.gen)",
 				subtitle: "The async/await of Effect",
-				tweet: true,
 				duration: "15 min",
 				content:
 					"Effect.gen is how you write sequential Effect code that reads like async/await. This is the syntax you'll use 90% of the time.",
@@ -443,7 +438,6 @@ console.log(Effect.runSync(getProfile))
 				id: 5,
 				title: "pipe & Pipelines",
 				subtitle: "The functional composition backbone",
-				tweet: false,
 				duration: "15 min",
 				content:
 					"pipe is the other main way to compose Effects (besides generators). If you've ever chained .then().then().catch() on Promises, pipe is the same idea — but with separate operators for each concern.",
@@ -584,7 +578,6 @@ const resilient = fetchUser(id).pipe(
 				id: 6,
 				title: "Control Flow",
 				subtitle: "if/else, loops, matching in Effect",
-				tweet: true,
 				duration: "15 min",
 				content:
 					"Effect gives you two styles. Imperative: normal if/else and for-loops inside Effect.gen — you already know this from TS. Declarative: Effect.if, Effect.forEach, Effect.all — describe WHAT should happen, not HOW. Imperative is better when logic is complex with many branches, early returns, or intermediate variables — it reads like regular TS. Declarative wins when you need composability: swapping sequential for concurrent is a one-line option change, and operators chain cleanly in pipes without nesting.",
@@ -815,7 +808,6 @@ const program = Effect.gen(function* () {
 				id: 7,
 				title: "The Two Error Types",
 				subtitle: "Expected vs Unexpected — the core insight",
-				tweet: true,
 				duration: "20 min",
 				content:
 					"In TypeScript, try/catch treats all errors the same — you never know what a function might throw. Effect splits errors into two categories. The rule is simple: could a user or the outside world cause this error? → Effect.fail (expected). Should it be impossible if the code is correct? → Effect.die (defect). You don't use Effect.die because you expect a bug — you use it as a safety net for things you believe are impossible, so if you're wrong, you crash loudly with a clear message instead of silently continuing with bad state.",
@@ -966,7 +958,6 @@ const getConfig = (key: string) => {
 				id: 8,
 				title: "Handling Expected Errors",
 				subtitle: "catchTag, catchAll, mapError",
-				tweet: false,
 				duration: "20 min",
 				content:
 					"Learn the operators to recover from, transform, or propagate typed errors.",
@@ -1178,7 +1169,6 @@ const program = getPost("missing").pipe(
 				id: 9,
 				title: "Retrying & Timeouts",
 				subtitle: "Schedule-based resilience",
-				tweet: false,
 				duration: "15 min",
 				content:
 					"In TypeScript, retrying means a while loop with try/catch, manual delay, and a counter. Timeouts mean wrapping everything in Promise.race with a setTimeout. It's messy, error-prone, and doesn't compose. Effect gives you declarative retry and timeout that snap onto any Effect with .pipe().",
@@ -1330,7 +1320,6 @@ const program = slowQuery.pipe(
 				id: 10,
 				title: "Yieldable Errors",
 				subtitle: "Errors as first-class values",
-				tweet: true,
 				duration: "15 min",
 				content:
 					'A powerful Effect pattern: make your errors yieldable so you can use yield* to "throw" them in generators.',
@@ -1371,7 +1360,6 @@ const getUser = (id: string) => Effect.gen(function* () {
 				id: 11,
 				title: "Services & Context",
 				subtitle: "The R in Effect<A, E, R>",
-				tweet: true,
 				duration: "15 min",
 				content:
 					"The R type parameter tracks what an Effect NEEDS to run. This is Effect's built-in dependency injection — no framework needed. In TypeScript you'd wire dependencies manually or use a DI container. Effect makes dependencies part of the type system.",
@@ -1612,7 +1600,6 @@ const result = program.pipe(
 				id: 12,
 				title: "Layers",
 				subtitle: "Composable dependency graphs",
-				tweet: false,
 				duration: "60 min",
 				content:
 					"In Step 11 you used Effect.provideService to give one service at a time. That works for simple cases. But real apps have chains: Database needs a ConnectionPool, which needs Config. Layers let you describe these chains once, and Effect wires them for you — in the right order, creating each service once. Key distinction: a Service is WHAT exists (the interface), a Layer is HOW to build it (the recipe). Effect.Service bundles both — that's why you already have layers via MyService.Default without writing any Layer code.",
@@ -1977,7 +1964,6 @@ Effect.runPromise(Effect.provide(program, AppLive))`,
 				id: 13,
 				title: "Scope & acquireRelease",
 				subtitle: "Never leak a resource again",
-				tweet: false,
 				duration: "45 min",
 				content:
 					"In TypeScript you use try/finally to clean up resources — but it's easy to forget, doesn't compose, and gets messy with multiple resources. Scope ensures resources (DB connections, file handles, sockets) are always cleaned up — even on errors or interruption. Acquire runs uninterruptibly (can't be cancelled halfway), and release is guaranteed. Multiple resources are released in reverse order (LIFO), just like nested try/finally blocks.",
@@ -2243,7 +2229,6 @@ const program = Effect.gen(function* () {
 				id: 14,
 				title: "Schema Basics",
 				subtitle: "Validation, parsing, encoding — one tool",
-				tweet: true,
 				duration: "60 min",
 				content:
 					"In TypeScript, you validate with Zod/Yup, define types manually, and serialize with yet another library. Schema does all three from one definition. It decodes (validate/parse external data), encodes (serialize for output), and infers TypeScript types — no duplication. Schema.decodeUnknown returns an Effect (can fail), Schema.decodeUnknownSync throws on failure.",
@@ -2454,7 +2439,6 @@ const result = Schema.decodeUnknownSync(Config)({})
 				id: 15,
 				title: "Schema Classes & Transformations",
 				subtitle: "Branded types, classes, transforms",
-				tweet: false,
 				duration: "45 min",
 				content:
 					"In TypeScript you define classes, interfaces, and validation separately. Schema classes unify all three: a class with built-in schema, type inference, structural equality, and constructor validation. Branded types solve a classic TS problem — preventing string-typed IDs from being mixed up. Transformations handle the \"API sends snake_case but I want camelCase\" problem bidirectionally.",
@@ -2723,7 +2707,6 @@ const shape = Schema.decodeUnknownSync(Shape)({ _tag: "Circle", radius: 5 })
 				id: 16,
 				title: "Option & Either",
 				subtitle: "Explicit absence, explicit branching",
-				tweet: false,
 				duration: "30 min",
 				content:
 					"In TypeScript you use null/undefined for absence and union types for branching — but they don't compose and are easy to forget. Option makes absence explicit: Some(value) or None. Either gives you type-safe branching: Right(success) or Left(failure). Both are plain data (not Effects) with a rich API for mapping, chaining, and matching. They bridge to existing TS code with fromNullable/getOrNull.",
@@ -2975,7 +2958,6 @@ const greeting = Option.match(currentUser, {
 				id: 17,
 				title: "Structured Logging",
 				subtitle: "From console.log to composable logs",
-				tweet: false,
 				duration: "40 min",
 				content:
 					"In TypeScript you scatter console.log calls everywhere, lose context in production, and bolt on Winston/Pino as an afterthought. Effect treats logging as a first-class Effect — composable, structured, annotated, and swappable without changing application code.",
@@ -3154,7 +3136,6 @@ const prodResult = noisyProgram.pipe(
 				id: 18,
 				title: "Tracing, Metrics & Supervision",
 				subtitle: "Spans, counters, and fiber monitoring",
-				tweet: false,
 				duration: "45 min",
 				content:
 					"Distributed tracing and metrics usually require heavy instrumentation libraries and manual plumbing. Effect bakes them in: withSpan creates trace spans, Metric gives you type-safe counters/histograms/gauges, and Supervisor lets you monitor fiber lifecycles — all composable and exportable to OpenTelemetry.",
@@ -3374,7 +3355,6 @@ const program = Effect.gen(function* () {
 				id: 19,
 				title: "Fibers & Basic Concurrency",
 				subtitle: "Lightweight threads for TypeScript",
-				tweet: true,
 				duration: "60 min",
 				content:
 					"Fibers are Effect's concurrency primitive — lightweight virtual threads that can be forked, joined, and interrupted.",
@@ -3591,7 +3571,6 @@ const program = Effect.race(fetchFromCDN, fetchFromOrigin)
 				id: 20,
 				title: "Queue, Deferred, Semaphore",
 				subtitle: "Coordination primitives",
-				tweet: false,
 				duration: "45 min",
 				content:
 					"When Fibers need to communicate or coordinate, Effect provides Queue (buffered channel), Deferred (one-shot promise), and Semaphore (concurrency limiter). Think of them as the building blocks Go developers get with channels, WaitGroups, and mutexes — but type-safe and composable.",
@@ -3882,7 +3861,6 @@ const program = Effect.gen(function* () {
 				id: 21,
 				title: "Creating & Transforming Streams",
 				subtitle: "Effect's answer to async iterables",
-				tweet: false,
 				duration: "45 min",
 				content:
 					"Stream is Effect's answer to async iterables and observables. It models a potentially infinite sequence of values produced over time — with typed errors and dependency injection baked in, just like Effect.",
@@ -4077,7 +4055,6 @@ const pages = Stream.unfoldEffect(1, (page) =>
 				id: 22,
 				title: "Sinks & Consuming Streams",
 				subtitle: "Collecting, folding, and aggregating",
-				tweet: false,
 				duration: "45 min",
 				content:
 					"A Stream produces values but does nothing until consumed. Sinks are the consumers — they collect, fold, aggregate, or process stream elements. Think of a Sink as the 'reduce' at the end of your pipeline.",
@@ -4299,7 +4276,6 @@ const program = events.pipe(
 				id: 23,
 				title: "Stream Concurrency & Error Handling",
 				subtitle: "Merging, racing, and recovering",
-				tweet: false,
 				duration: "45 min",
 				content:
 					"Streams support concurrency (parallel flatMap, merging), error recovery (catchAll, retry), and resource management (finalizers, scoped streams). This is where Streams pull ahead of plain async iterables.",
@@ -4538,7 +4514,6 @@ const result = Stream.runCollect(recovered)
 				id: 24,
 				title: "Testing with Effect",
 				subtitle: "TestClock, service mocking, and more",
-				tweet: false,
 				duration: "45 min",
 				content:
 					"Effect's dependency injection makes testing easy: swap real services for test implementations. TestClock lets you control time.",
@@ -4730,7 +4705,6 @@ const test = Effect.gen(function* () {
 				id: 25,
 				title: "Code Style & Patterns",
 				subtitle: "Dual APIs, branded types, pattern matching",
-				tweet: true,
 				duration: "30 min",
 				content:
 					"Wrap up by learning Effect's idioms: dual APIs (data-first vs data-last), branded types for domain modeling, and Match for exhaustive pattern matching.",
@@ -4947,7 +4921,6 @@ isPaid(Pending())             // false`,
 				id: 26,
 				title: "Configuration",
 				subtitle: "Config, ConfigProvider, secrets",
-				tweet: false,
 				duration: "30 min",
 				content:
 					"Effect has built-in typed configuration that reads from env vars by default. Config values are Effects — they compose, fail with clear messages, and can be swapped for testing.",
@@ -5054,7 +5027,6 @@ const dbConfig = Config.nested(
 				id: 27,
 				title: "HTTP Client & Server",
 				subtitle: "@effect/platform for HTTP",
-				tweet: true,
 				duration: "60 min",
 				content:
 					"@effect/platform provides a typed HTTP client and server that integrate with Effect's error handling, services, and schemas. No more raw fetch().",
@@ -5187,7 +5159,6 @@ const fetchUser = (id: number) => Effect.gen(function* () {
 				id: 28,
 				title: "FileSystem & Command",
 				subtitle: "@effect/platform for OS interactions",
-				tweet: false,
 				duration: "45 min",
 				content:
 					"@effect/platform provides cross-platform FileSystem and Command services for file I/O and running subprocesses — all as Effects with proper resource management.",
@@ -5303,7 +5274,6 @@ const migrate = Effect.gen(function* () {
 				id: 29,
 				title: "SQL & Databases",
 				subtitle: "@effect/sql for type-safe queries",
-				tweet: false,
 				duration: "45 min",
 				content:
 					"@effect/sql provides type-safe database access with connection pooling, transactions, and migrations — all integrated with Effect's service and resource management.",
@@ -5425,7 +5395,6 @@ const getAllUsers = Effect.gen(function* () {
 				id: 30,
 				title: "Real-World Patterns",
 				subtitle: "Putting it all together",
-				tweet: true,
 				duration: "60 min",
 				content:
 					"You've learned the pieces — now see how they compose in production. This step covers common patterns for structuring real Effect applications.",
@@ -5572,7 +5541,6 @@ const UserRepositoryLive = Layer.effect(
 				id: 31,
 				title: "CLI Applications",
 				subtitle: "@effect/cli for type-safe CLIs",
-				tweet: false,
 				duration: "45 min",
 				content:
 					"@effect/cli lets you build fully typed CLI applications with commands, options, and arguments — all validated with Schema. Think commander.js but with Effect's type safety and composability.",
@@ -5740,7 +5708,6 @@ const command = db.pipe(Command.withSubcommands([migrate, seed]))
 				id: 32,
 				title: "Testing with Effect",
 				subtitle: "@effect/vitest, TestClock, mocking services",
-				tweet: true,
 				duration: "45 min",
 				content:
 					"@effect/vitest provides Effect-aware test runners that handle services, scopes, and test clocks automatically. Combined with Layer-based mocking, you get deterministic, isolated tests with zero monkey-patching.",
@@ -5951,7 +5918,6 @@ it.effect("retries with delay", () =>
 				id: 33,
 				title: "DevTools & Developer Experience",
 				subtitle: "Language service, ESLint, VS Code extension",
-				tweet: false,
 				duration: "30 min",
 				content:
 					"Effect has first-class developer tooling: a TypeScript language service plugin with 50+ diagnostics, a VS Code extension with fiber debugging, and an ESLint plugin. These catch mistakes at dev time, not runtime.",
@@ -6143,20 +6109,6 @@ export const TOTAL_HOURS = Math.round(
 		0,
 	) / 60,
 );
-
-export const TWEET_TEMPLATES: Record<number, string> = {
-	6: `@EffectTS_ control flow in 2 lines:\n\nImperative: if (x) yield* doThing()\nDeclarative: Effect.forEach(users, sendEmail, { concurrency: 5 })\n\nOne reads like TS. The other composes.\n\n#EffectTS`,
-	4: `Effect.gen = async/await but with typed errors\n\nconst name = Effect.succeed("Alice")\nconst getUser = (id) => Effect.tryPromise(...)\n\nyield* name        — no (), it's already an Effect\nyield* getUser(id) — (), it returns an Effect\n\n#EffectTS #TypeScript`,
-	7: `The biggest "aha" moment learning @EffectTS_:\n\nThere are TWO kinds of errors:\n\n- Expected (in the type signature) — you MUST handle them\n- Defects (hidden) — bugs that bubble up\n\ntry/catch treats all errors the same. Effect doesn't.\n\n#TypeScript`,
-	10: `Yieldable errors in @EffectTS_ are genius:\n\nclass NotFound extends Data.TaggedError("NotFound")<{ id: string }> {}\n\nyield* new NotFound({ id })\n\nType-safe "throwing" inside generators. No more stringly-typed errors.\n\n#EffectTS`,
-	11: `Dependency injection in @EffectTS_ is tracked by the TYPE SYSTEM.\n\nEffect<User, DbError, Database | Logger>\n\nThe compiler literally won't let you run this until you provide Database AND Logger.\n\nNo runtime DI container. No decorators. Just types.\n\n#TypeScript`,
-	14: `@effect/schema is what happens when Zod meets bidirectional transforms:\n\n-> decode (validate external data)\n-> encode (serialize for output)\n-> type inference\n\nOne schema definition. Multiple directions.\n\n#EffectTS #TypeScript`,
-	19: `Fibers in @EffectTS_ = lightweight virtual threads for TypeScript\n\nEffect.fork -> start a fiber\nFiber.join -> wait for result\nFiber.interrupt -> cancel (resources auto-cleanup)\n\nOr just: Effect.all(tasks, { concurrency: 10 })\n\n#EffectTS`,
-	25: `Finished the core @EffectTS_ curriculum!\n\nBiggest takeaways:\n- Effect<A, E, R> — one type to rule them all\n- Generators for logic, pipes for behavior\n- Services + Layers = testable by default\n- Schema for validation + serialization\n\nNow onto the ecosystem.\n\n#EffectTS #TypeScript`,
-	27: `@effect/platform's HttpClient changed how I think about HTTP in TypeScript:\n\n- It's a SERVICE you inject (mockable!)\n- Schema validates responses automatically\n- Errors are typed, not thrown\n- Same code works Node/Bun/browser\n\nNo more raw fetch().\n\n#EffectTS`,
-	30: `Finished my @EffectTS_ journey — here's the production pattern:\n\n1. Services define capabilities\n2. Layers wire dependencies\n3. Config loads settings\n4. Schema validates boundaries\n5. ManagedRuntime runs everything\n\nOne type. Full stack. Type-safe.\n\n#EffectTS #TypeScript`,
-	32: `Testing @EffectTS_ apps is a different game:\n\n❌ jest.mock("./db")\n✅ Layer.succeed(DbService, mockImpl)\n\n❌ vi.useFakeTimers()\n✅ TestClock.adjust("5 seconds")\n\nNo monkey-patching. No global state. Just swap Layers.\n\n#EffectTS #TypeScript`,
-};
 
 export function getPhaseBySlug(slug: string): Phase | undefined {
 	return PHASES.find((p) => p.slug === slug);
