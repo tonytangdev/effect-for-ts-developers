@@ -1,4 +1,4 @@
-import { PHASES, TOTAL_STEPS } from "@/data/steps";
+import { PHASES, TOTAL_STEPS, TOTAL_HOURS } from "@/data/steps";
 import { ProgressProvider } from "@/components/progress-provider";
 import { Header } from "@/components/header";
 import { PhaseCard } from "@/components/phase-card";
@@ -13,14 +13,14 @@ export default function HomePage() {
             Learn Effect TS
           </h2>
           <p className="text-[13px] text-text-body leading-relaxed max-w-lg">
-            A structured 22-step learning path from zero to productive. Each
-            phase builds on the last — start with Foundation and work your way
-            through.
+            A structured {TOTAL_STEPS}-step learning path from zero to productive.
+            Each phase builds on the last — start with Foundation and work your
+            way through.
           </p>
           <div className="flex gap-4 mt-4 text-[11px] text-text-muted">
             <span>{TOTAL_STEPS} steps</span>
             <span>{PHASES.length} phases</span>
-            <span>~14 hours</span>
+            <span>~{TOTAL_HOURS} hours</span>
           </div>
         </div>
 

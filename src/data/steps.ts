@@ -6135,6 +6135,15 @@ export const TOTAL_STEPS = PHASES.reduce(
 	0,
 );
 
+export const TOTAL_HOURS = Math.round(
+	PHASES.reduce(
+		(acc, phase) =>
+			acc +
+			phase.steps.reduce((sum, step) => sum + Number.parseInt(step.duration), 0),
+		0,
+	) / 60,
+);
+
 export const TWEET_TEMPLATES: Record<number, string> = {
 	6: `@EffectTS_ control flow in 2 lines:\n\nImperative: if (x) yield* doThing()\nDeclarative: Effect.forEach(users, sendEmail, { concurrency: 5 })\n\nOne reads like TS. The other composes.\n\n#EffectTS`,
 	4: `Effect.gen = async/await but with typed errors\n\nconst name = Effect.succeed("Alice")\nconst getUser = (id) => Effect.tryPromise(...)\n\nyield* name        — no (), it's already an Effect\nyield* getUser(id) — (), it returns an Effect\n\n#EffectTS #TypeScript`,
