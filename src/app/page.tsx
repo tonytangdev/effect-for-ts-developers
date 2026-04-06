@@ -7,6 +7,7 @@ export default function HomePage() {
   return (
     <ProgressProvider>
       <Header />
+
       <main className="px-4 sm:px-6 py-8 pb-20 max-w-2xl mx-auto w-full">
         <div className="mb-10">
           <h2 className="font-serif text-2xl sm:text-3xl text-text-heading mb-3">

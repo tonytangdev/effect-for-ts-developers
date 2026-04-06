@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useProgress } from "./progress-provider";
 import { Sidebar } from "./sidebar";
+import { ThemeToggle } from "./theme-toggle";
 
 export function Header() {
   const { progress } = useProgress();
@@ -21,12 +22,15 @@ export function Header() {
               A course for TypeScript developers
             </p>
           </Link>
-          <button
-            onClick={() => setShowSidebar(true)}
-            className="bg-bg-elevated border border-border text-text px-3 py-1.5 text-[11px] cursor-pointer font-mono hover:border-accent-dark transition-colors"
-          >
-            {progress}% done
-          </button>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <button
+              onClick={() => setShowSidebar(true)}
+              className="bg-bg-elevated border border-border text-text px-3 py-1.5 text-[11px] cursor-pointer font-mono hover:border-accent-dark transition-colors"
+            >
+              {progress}% done
+            </button>
+          </div>
         </div>
         <div className="mt-3 h-0.5 bg-bg-elevated relative">
           <div

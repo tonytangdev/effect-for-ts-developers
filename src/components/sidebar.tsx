@@ -16,7 +16,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
   return (
     <div className="fixed inset-0 z-[200] flex">
-      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="absolute inset-0 bg-overlay" onClick={onClose} />
       <div className="relative w-[85%] max-w-[360px] bg-bg border-r border-border overflow-y-auto p-5">
         <div className="flex justify-between items-center mb-5">
           <h2 className="font-serif text-lg m-0">Progress</h2>
@@ -53,9 +53,9 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                   style={{
                     border: completedSteps.has(step.id)
                       ? "none"
-                      : "1px solid #555",
+                      : "1px solid var(--color-text-muted)",
                     background: completedSteps.has(step.id)
-                      ? "#8B7355"
+                      ? "var(--color-accent-dark)"
                       : "transparent",
                   }}
                 >

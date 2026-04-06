@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, Playfair_Display } from "next/font/google";
+import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
 const ibmPlexMono = IBM_Plex_Mono({
@@ -33,8 +34,18 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${ibmPlexMono.variable} ${playfairDisplay.variable}`}
+      suppressHydrationWarning
     >
-      <body className="min-h-screen font-mono">{children}</body>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem("effect-course-theme");if(t==="light"||(!t&&window.matchMedia("(prefers-color-scheme: light)").matches)){document.documentElement.setAttribute("data-theme","light")}}catch(e){}})()`,
+          }}
+        />
+      </head>
+      <body className="min-h-screen font-mono">
+        <ThemeProvider>{children}</ThemeProvider>
+      </body>
     </html>
   );
 }

@@ -26,7 +26,7 @@ export function TweetSection({ stepId }: TweetSectionProps) {
           Post what you learned
         </span>
       </div>
-      <pre className="text-[11px] leading-relaxed text-[#8BA8D8] whitespace-pre-wrap break-words m-0 font-mono">
+      <pre className="text-[11px] leading-relaxed text-tweet whitespace-pre-wrap break-words m-0 font-mono opacity-70">
         {tweet}
       </pre>
       <a

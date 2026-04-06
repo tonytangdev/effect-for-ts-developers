@@ -15,12 +15,11 @@ export function StepActions({ step }: StepActionsProps) {
     <div className="flex items-center gap-2.5 flex-wrap">
       <button
         onClick={() => toggleComplete(step.id)}
-        className="px-4 py-2 text-[11px] cursor-pointer font-mono transition-all"
-        style={{
-          background: isCompleted ? "#8B7355" : "#2a2a25",
-          border: isCompleted ? "1px solid #8B7355" : "1px solid #3a3a35",
-          color: isCompleted ? "#fff" : "#b8b4ac",
-        }}
+        className={`px-4 py-2 text-[11px] cursor-pointer font-mono transition-all border ${
+          isCompleted
+            ? "bg-accent-dark border-accent-dark text-white"
+            : "bg-bg-elevated border-border text-text-body"
+        }`}
       >
         {isCompleted ? "\u2713 Completed" : "Mark complete"}
       </button>

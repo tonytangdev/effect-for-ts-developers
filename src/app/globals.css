@@ -1,36 +1,83 @@
 @import "tailwindcss";
 
 @theme inline {
-  --color-bg: #1a1a18;
-  --color-bg-card: #222220;
-  --color-bg-elevated: #2a2a25;
-  --color-border: #3a3a35;
-  --color-text: #e8e4dc;
-  --color-text-heading: #f5f0e8;
-  --color-text-muted: #888880;
-  --color-text-subtle: #999990;
-  --color-text-body: #b8b4ac;
-  --color-accent: #C4A67D;
-  --color-accent-dark: #8B7355;
-  --color-tweet: #5B8DEF;
-  --color-trap: #c89080;
-  --color-trap-bg: rgba(200, 100, 80, 0.08);
-  --color-trap-border: rgba(200, 100, 80, 0.2);
-  --color-tweet-bg: rgba(91, 141, 239, 0.06);
-  --color-tweet-border: rgba(91, 141, 239, 0.15);
+  --color-bg: var(--th-bg);
+  --color-bg-card: var(--th-bg-card);
+  --color-bg-elevated: var(--th-bg-elevated);
+  --color-border: var(--th-border);
+  --color-text: var(--th-text);
+  --color-text-heading: var(--th-text-heading);
+  --color-text-muted: var(--th-text-muted);
+  --color-text-subtle: var(--th-text-subtle);
+  --color-text-body: var(--th-text-body);
+  --color-accent: var(--th-accent);
+  --color-accent-dark: var(--th-accent-dark);
+  --color-tweet: var(--th-tweet);
+  --color-trap: var(--th-trap);
+  --color-trap-bg: var(--th-trap-bg);
+  --color-trap-border: var(--th-trap-border);
+  --color-tweet-bg: var(--th-tweet-bg);
+  --color-tweet-border: var(--th-tweet-border);
+  --color-overlay: var(--th-overlay);
   --font-mono: "IBM Plex Mono", "JetBrains Mono", ui-monospace, monospace;
   --font-serif: "Playfair Display", ui-serif, Georgia, serif;
+}
+
+/* ── Dark theme (default) ── */
+:root {
+  --th-bg: #1a1a18;
+  --th-bg-card: #222220;
+  --th-bg-elevated: #2a2a25;
+  --th-border: #3a3a35;
+  --th-text: #e8e4dc;
+  --th-text-heading: #f5f0e8;
+  --th-text-muted: #888880;
+  --th-text-subtle: #999990;
+  --th-text-body: #b8b4ac;
+  --th-accent: #C4A67D;
+  --th-accent-dark: #8B7355;
+  --th-tweet: #5B8DEF;
+  --th-trap: #c89080;
+  --th-trap-bg: rgba(200, 100, 80, 0.08);
+  --th-trap-border: rgba(200, 100, 80, 0.2);
+  --th-tweet-bg: rgba(91, 141, 239, 0.06);
+  --th-tweet-border: rgba(91, 141, 239, 0.15);
+  --th-overlay: rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
+}
+
+/* ── Light theme ── */
+[data-theme="light"] {
+  --th-bg: #f5f0e8;
+  --th-bg-card: #ffffff;
+  --th-bg-elevated: #ebe5da;
+  --th-border: #d5cfc4;
+  --th-text: #302a22;
+  --th-text-heading: #1a1510;
+  --th-text-muted: #8a8578;
+  --th-text-subtle: #6a655a;
+  --th-text-body: #4a4540;
+  --th-accent: #9B7B4F;
+  --th-accent-dark: #7A5F3C;
+  --th-tweet: #3B6BCF;
+  --th-trap: #b04030;
+  --th-trap-bg: rgba(176, 64, 48, 0.06);
+  --th-trap-border: rgba(176, 64, 48, 0.15);
+  --th-tweet-bg: rgba(59, 107, 207, 0.06);
+  --th-tweet-border: rgba(59, 107, 207, 0.12);
+  --th-overlay: rgba(0, 0, 0, 0.3);
+  color-scheme: light;
 }
 
 body {
   background: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-mono);
+  transition: background 0.3s ease, color 0.3s ease;
 }
 
-/* Shiki code block styling */
+/* Shiki dual-theme: show correct theme based on data-theme */
 pre.shiki {
-  background: var(--color-bg) !important;
   border: 1px solid var(--color-border);
   padding: 14px;
   font-size: 11px;
@@ -42,4 +89,21 @@ pre.shiki {
 
 pre.shiki code {
   font-family: var(--font-mono);
+}
+
+/* Shiki dual theme CSS — dark visible by default, light hidden */
+html:not([data-theme="light"]) .shiki .shiki-light { display: none; }
+[data-theme="light"] .shiki .shiki-dark { display: none; }
+
+.shiki,
+.shiki span {
+  background-color: var(--color-bg) !important;
+}
+
+[data-theme="light"] .shiki span {
+  color: var(--shiki-light) !important;
+}
+
+html:not([data-theme="light"]) .shiki span {
+  color: var(--shiki-dark, var(--shiki--token-color)) !important;
 }
